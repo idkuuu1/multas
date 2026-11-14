@@ -124,6 +124,11 @@
   .btn.danger { background: var(--red); }
   .btn:active, .pill:active, #torch:active { opacity: .7; }
   :focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+  #issuer { margin: -4px 0 0; font-size: .95rem; color: var(--muted); }
+  #issuer b { color: var(--fg); }
+  .actions.col { flex-direction: column; }
+  .actions.col .btn { flex: none; width: 100%; }
+  .more { display: block; text-align: center; font-size: .86rem; color: var(--blue); text-decoration: none; padding: 2px 0; }
   .foot { margin: 0; font-size: .78rem; color: var(--muted); text-align: center; }
 </style>
 </head>
@@ -159,6 +164,7 @@
     <!-- Resultado -->
     <div id="resultView" hidden>
       <h1 id="rTitle">Multa leída</h1>
+      <p id="issuer" hidden></p>
 
       <div id="verdict" class="warn">
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.3 8 11 4.6-1.7 8-6 8-11V5l-8-3z"/></svg>
@@ -172,10 +178,12 @@
           <button class="pill" id="cTag">Copiar</button></div>
       </div>
 
-      <div class="actions">
+      <div class="actions col">
+        <a id="official" class="btn primary" target="_blank" rel="noopener noreferrer" hidden>Pagar en el sitio oficial</a>
+        <a id="go" class="btn" target="_blank" rel="noopener noreferrer">Abrir enlace del QR</a>
         <button id="again" class="btn">Escanear otra</button>
-        <a id="go" class="btn primary" target="_blank" rel="noopener noreferrer">Abrir sitio de pago</a>
       </div>
+      <a id="others" class="more" target="_blank" rel="noopener noreferrer" hidden>Ver todos los resultados oficiales</a>
       <p class="foot" id="foot"></p>
     </div>
   </div>
@@ -232,6 +240,65 @@ window.addEventListener('DOMContentLoaded', () => {
     f.value = [...f.votes].sort((a, b) => b[1] - a[1])[0][0];
   }
   const sure = kind => (fields[kind].votes.get(fields[kind].value) || 0) >= 2;
+
+  // ============ 1b. ¿Quién emitió la multa? ============
+  const STATE_NAMES = { ALABAMA:'AL', ALASKA:'AK', ARIZONA:'AZ', ARKANSAS:'AR', CALIFORNIA:'CA', COLORADO:'CO', CONNECTICUT:'CT', DELAWARE:'DE',
+    'DISTRICT OF COLUMBIA':'DC', FLORIDA:'FL', GEORGIA:'GA', HAWAII:'HI', IDAHO:'ID', ILLINOIS:'IL', INDIANA:'IN', IOWA:'IA', KANSAS:'KS', KENTUCKY:'KY',
+    LOUISIANA:'LA', MAINE:'ME', MARYLAND:'MD', MASSACHUSETTS:'MA', MICHIGAN:'MI', MINNESOTA:'MN', MISSISSIPPI:'MS', MISSOURI:'MO', MONTANA:'MT',
+    NEBRASKA:'NE', NEVADA:'NV', 'NEW HAMPSHIRE':'NH', 'NEW JERSEY':'NJ', 'NEW MEXICO':'NM', 'NEW YORK':'NY', 'NORTH CAROLINA':'NC', 'NORTH DAKOTA':'ND',
+    OHIO:'OH', OKLAHOMA:'OK', OREGON:'OR', PENNSYLVANIA:'PA', 'RHODE ISLAND':'RI', 'SOUTH CAROLINA':'SC', 'SOUTH DAKOTA':'SD', TENNESSEE:'TN', TEXAS:'TX',
+    UTAH:'UT', VERMONT:'VT', VIRGINIA:'VA', WASHINGTON:'WA', 'WEST VIRGINIA':'WV', WISCONSIN:'WI', WYOMING:'WY' };
+  const STOP = /\b(POLICE|PARKING|DEPARTMENT|DEPT|DIVISION|ENFORCEMENT|CITATION|TRAFFIC|NOTICE|VIOLATION|SUMMONS|UNIFORM|SERVICES|AUTHORITY|OFFICE|COURT|SHERIFF|PUBLIC|SAFETY|TRANSPORTATION|BUREAU|MUNICIPAL)\b.*$/;
+  const title = w => w.toLowerCase().replace(/\b[a-z]/g, c => c.toUpperCase());
+  const issuer = { votes: new Map(), value: null };
+  function parseIssuer(text) {
+    const lines = text.toUpperCase().split('\n').map(l => l.replace(/[^A-Z0-9 ,.'&-]/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean).slice(0, 10);
+    for (const line of lines) {
+      let kind = '', name = '', m, after = false;
+      if ((m = line.match(/\b(CITY|TOWN|VILLAGE|COUNTY|BOROUGH|TOWNSHIP|PARISH)\s+OF\s+(?:THE\s+)?([A-Z][A-Z .'-]{2,40})/))) { kind = m[1]; name = m[2]; }
+      else if ((m = line.match(/\b(UNIVERSITY)\s+OF\s+([A-Z][A-Z .'-]{2,40})/))) { kind = 'UNIVERSITY'; name = m[2]; }
+      else if ((m = line.match(/^(?:THE\s+)?([A-Z][A-Z .'-]{2,30}?)\s+(COUNTY|CITY|PARISH|UNIVERSITY)\b/)) && !/\b(PARKING|CITATION|NOTICE|VIOLATION)\b/.test(m[1])) { name = m[1]; kind = m[2]; after = true; }
+      else if ((m = line.match(/^(?:THE\s+)?([A-Z][A-Z .'-]{2,30}?)\s+(POLICE|SHERIFF|PARKING AUTHORITY)\b/)) && !/\b(PARKING|CITATION|NOTICE|UNIFORM)\b/.test(m[1])) { name = m[1]; kind = m[2] === 'POLICE' ? 'POLICE' : m[2]; }
+      if (!name) continue;
+      name = name.split(',')[0].replace(STOP, '').trim().split(' ').slice(0, 3).join(' ');
+      if (name.length < 3 || /^(OF|THE)$/.test(name)) continue;
+      // estado: el nombre completo o la sigla tras una coma, en la cabecera (no el del coche)
+      let st = '';
+      const head = lines.join(' ');
+      for (const [full, ab] of Object.entries(STATE_NAMES)) if (new RegExp('\\b(?:COMMONWEALTH|STATE) OF ' + full + '\\b|,\\s*' + full + '\\b|\\b' + full + '\\s*$').test(line) || new RegExp('\\b(?:COMMONWEALTH|STATE) OF ' + full + '\\b').test(head)) { st = ab; break; }
+      if (!st) { const a = line.match(/,\s*([A-Z]{2})\b/); if (a && STATES.includes(a[1])) st = a[1]; }
+      const nice = { CITY: 'City of ', TOWN: 'Town of ', VILLAGE: 'Village of ', COUNTY: '', BOROUGH: 'Borough of ', TOWNSHIP: 'Township of ', PARISH: '', UNIVERSITY: '', POLICE: '' }[kind] ?? '';
+      const label = after ? title(name) + ' ' + title(kind)
+                  : kind === 'COUNTY' || kind === 'PARISH' ? title(name) + ' ' + title(kind)
+                  : kind === 'UNIVERSITY' ? (/OF/.test(line) ? 'University of ' + title(name) : title(name) + ' University')
+                  : kind === 'POLICE' || kind === 'SHERIFF' || kind === 'PARKING AUTHORITY' ? title(name) : nice + title(name);
+      return { name: title(name), label, state: st, edu: kind === 'UNIVERSITY', parking: /PARKING/.test(head) };
+    }
+    return null;
+  }
+  function voteIssuer(text) {
+    const r = parseIssuer(text);
+    if (!r) return;
+    const key = r.label;
+    const e = issuer.votes.get(key) || { n: 0, r };
+    e.n++; if (!e.r.state && r.state) e.r = r;
+    issuer.votes.set(key, e);
+    issuer.value = [...issuer.votes.values()].sort((a, b) => b.n - a.n)[0].r;
+  }
+  // El sitio oficial se busca por el emisor, no por el QR: un QR falso no puede cambiar a dónde lleva
+  function officialSearch(iss, lucky) {
+    const scope = iss.edu ? 'site:.edu' : 'site:.gov';
+    const q = (lucky ? '\\' : '') + scope + ' ' + iss.label + (iss.state ? ' ' + iss.state : '') + ' pay ' + (iss.parking ? 'parking ' : '') + 'citation online';
+    return 'https://duckduckgo.com/?q=' + encodeURIComponent(q);
+  }
+  function matchesIssuer(host, iss) {
+    if (!iss) return false;
+    const h = host.toLowerCase().replace(/^www\./, '');
+    if (!(iss.edu ? /\.edu$/ : /(\.gov|\.us)$/).test(h)) return false;
+    const words = iss.name.toLowerCase().split(' ').filter(w => w.length >= 4 && !/^(city|town|county|saint)$/.test(w));
+    const joined = iss.name.toLowerCase().replace(/[^a-z]/g, ''), initials = iss.name.split(' ').map(w => w[0]).join('').toLowerCase();
+    return h.includes(joined) || words.some(w => h.includes(w)) || (initials.length >= 2 && new RegExp('(^|\\.)' + initials + '[a-z]{0,2}\\.').test(h));
+  }
 
   // ============ 2. ¿Es de fiar el sitio? ============
   const REDIRECTORS = /(^|\.)(w69b\.com|bit\.ly|tinyurl\.com|t\.co|goo\.gl|qrco\.de|rebrand\.ly|qr\.io|me-qr\.com|l\.ead\.me|flow\.page|qrfy\.com|scan\.page|is\.gd|cutt\.ly|ow\.ly|page\.link|qr-code-generator\.com|q-r\.to)$/i;
@@ -336,6 +403,7 @@ window.addEventListener('DOMContentLoaded', () => {
     state = 'scanning'; site = null; siteAt = dataAt = 0;
     paper = null; lockHits = 0; steady = false; prevGrid = null;
     for (const f of Object.values(fields)) { f.votes.clear(); f.value = ''; f.zone = null; f.tries = 0; }
+    issuer.votes.clear(); issuer.value = null;
     $('resultView').hidden = true; $('scanView').hidden = false;
     try { sheet.classList.toggle('mini', !!localStorage.getItem('multas.mini')); } catch {}
     step('stSite', 'busy', 'Buscando el código QR…'); step('stNum', '', '—'); step('stTag', '', '—');
@@ -493,6 +561,7 @@ window.addEventListener('DOMContentLoaded', () => {
           const { data } = await worker.recognize(g.canvas);
           if (state !== 'scanning') break;
           const text = data.text || '', k = g.rect.w / g.canvas.width;
+          voteIssuer(text);
           for (const kd of ['num', 'tag']) {
             vote(kd, parse(kd, text));
             const line = (data.lines || []).find(l => LABEL[kd].test(l.text));
@@ -526,6 +595,7 @@ window.addEventListener('DOMContentLoaded', () => {
     if (both && !dataAt) dataAt = now;
     if (site && both) return finish();
     if (site && now - siteAt > 12000) return finish();         // sitio sí, datos no: no esperar más
+    if (!site && both && issuer.value && now - dataAt > 3000) return finish(); // emisor y datos: el QR ya no hace falta
     if (!site && both && now - dataAt > 8000) return finish(); // datos sí, QR no
   }
 
@@ -544,29 +614,66 @@ window.addEventListener('DOMContentLoaded', () => {
     const missing = !fields.num.value || !fields.tag.value;
     $('rTitle').textContent = missing ? 'Revisa los datos' : 'Multa leída';
     hint(missing ? 'No pude leer todo: complétalo a mano' : 'Listo');
-    const go = $('go'), v = $('verdict');
+    const go = $('go'), off = $('official'), others = $('others'), v = $('verdict'), iss = issuer.value;
     go.dataset.confirm = '';
+    $('issuer').hidden = !iss;
+    if (iss) { $('issuer').textContent = 'Emitida por '; const b = document.createElement('b'); b.textContent = iss.label + (iss.state ? ', ' + iss.state : ''); $('issuer').append(b); }
+    off.hidden = others.hidden = !iss;
+    if (iss) {
+      off.href = officialSearch(iss, true); others.href = officialSearch(iss, false);
+      off.textContent = 'Pagar en el sitio oficial de ' + iss.label;
+    }
+    go.hidden = !site;
+    if (site) go.href = site.href; else go.removeAttribute('href');
+    go.className = 'btn'; go.style.order = '';
+
     if (!site) {
-      v.className = 'warn';
-      $('vdTitle').textContent = 'No encontré el código QR'; $('vdHost').textContent = '';
-      fillWhy(['Busca el sitio por el nombre de la ciudad o corte que aparece en la multa.', 'Entra solo en sitios .gov o en el que nombra la propia multa.']);
-      go.textContent = 'Buscar sitio oficial'; go.className = 'btn primary';
-      go.href = 'https://duckduckgo.com/?q=' + encodeURIComponent('pay citation online official site');
+      if (iss) {
+        v.className = 'safe';
+        $('vdTitle').textContent = 'Te llevo al sitio oficial del emisor'; $('vdHost').textContent = iss.edu ? 'solo sitios .edu' : 'solo sitios .gov';
+        fillWhy(['No encontré código QR. El botón busca el sitio de pago de ' + iss.label + ' solo entre dominios oficiales y abre el primero.',
+                 'Si la multa fuera falsa, su número no aparecerá en el sitio oficial.']);
+      } else {
+        v.className = 'warn';
+        $('vdTitle').textContent = 'No identifiqué al emisor ni encontré QR'; $('vdHost').textContent = '';
+        fillWhy(['Busca el sitio por el nombre de la ciudad, condado o corte que aparece arriba en la multa.', 'Entra solo en sitios .gov o en el que nombra la propia multa.']);
+        off.hidden = false; off.textContent = 'Buscar sitio oficial';
+        off.href = 'https://duckduckgo.com/?q=' + encodeURIComponent('site:.gov pay citation online');
+      }
       return;
     }
-    const j = judge(site), target = site;
-    v.className = j.level;
-    $('vdTitle').textContent = j.title; $('vdHost').textContent = j.host; fillWhy(j.why);
-    go.href = site.href;
-    go.textContent = j.level === 'bad' ? 'Abrir de todos modos' : 'Abrir sitio de pago';
-    go.className = 'btn primary' + (j.level === 'bad' ? ' danger' : '');
-    if (j.level === 'bad') go.dataset.confirm = '1';
-    // Un sitio que no existe casi siempre es un QR falso o dañado
-    if (j.level !== 'bad') exists(site).then(ok => {
+
+    const j = judge(site), target = site, match = matchesIssuer(site.hostname, iss);
+    $('vdHost').textContent = j.host;
+    if (j.level === 'bad') {
+      v.className = 'bad'; $('vdTitle').textContent = j.title; fillWhy(j.why);
+      go.textContent = 'Abrir enlace del QR de todos modos'; go.className = 'btn danger'; go.dataset.confirm = '1';
+    } else if (iss && match) {
+      v.className = 'safe'; $('vdTitle').textContent = 'El QR coincide con el emisor';
+      fillWhy(['El enlace del QR es un dominio oficial de ' + iss.label + '.', ...j.why.filter(w => /Ya abriste/.test(w))]);
+      go.textContent = 'Abrir sitio de pago oficial'; go.className = 'btn primary'; go.style.order = '-1';
+      off.textContent = 'Buscar el sitio de ' + iss.label + ' por mi cuenta'; off.className = 'btn';
+      return checkAlive(target);
+    } else if (iss) {
+      v.className = 'warn'; $('vdTitle').textContent = 'El QR no lleva al sitio oficial de ' + iss.label;
+      fillWhy([REDIRECTORS.test(site.hostname) ? 'El QR pasa por un servicio intermedio y no puedo comprobar a dónde termina.' : 'El dominio del QR no pertenece a ' + iss.label + '.',
+               'Usa el botón azul: busca el sitio de pago solo entre dominios oficiales. Si la multa fuera falsa, su número no aparecerá allí.']);
+      go.textContent = 'Abrir enlace del QR';
+    } else {
+      v.className = j.level; $('vdTitle').textContent = j.title; fillWhy(j.why);
+      go.textContent = 'Abrir sitio de pago'; go.className = 'btn primary';
+    }
+    off.className = 'btn primary';
+    if (j.level !== 'bad') checkAlive(target);
+  }
+  // Un sitio que no existe casi siempre es un QR falso o dañado
+  function checkAlive(target) {
+    const go = $('go'), v = $('verdict');
+    exists(target).then(ok => {
       if (ok || state !== 'result' || site !== target) return;
-      v.className = 'bad'; $('vdTitle').textContent = 'El sitio no responde';
-      fillWhy(['La dirección del QR no existe o está caída. No introduzcas datos de pago.']);
-      go.textContent = 'Abrir de todos modos'; go.className = 'btn primary danger'; go.dataset.confirm = '1';
+      v.className = 'bad'; $('vdTitle').textContent = 'El enlace del QR no responde';
+      fillWhy(['La dirección del QR no existe o está caída. No introduzcas datos de pago en ella.' + (issuer.value ? ' Usa el sitio oficial del emisor.' : '')]);
+      go.textContent = 'Abrir enlace del QR de todos modos'; go.className = 'btn danger'; go.dataset.confirm = '1';
     });
   }
   async function exists(url) {
@@ -585,19 +692,22 @@ window.addEventListener('DOMContentLoaded', () => {
   }
   $('cNum').onclick = () => copy($('fNum'), $('cNum'));
   $('cTag').onclick = () => copy($('fTag'), $('cTag'));
+  function copyOnOpen() {
+    const n = $('fNum').value.trim();
+    if (!n) return;
+    navigator.clipboard?.writeText(n).catch(() => {});
+    $('foot').textContent = 'Citation No. copiado: pégalo en el sitio. Luego vuelve aquí y pulsa «Copiar» en Vehicle Tag.';
+  }
   $('go').addEventListener('click', e => {
     const go = $('go');
     if (go.dataset.confirm === '1') {           // sitio sospechoso: pide un segundo toque
       e.preventDefault(); go.dataset.confirm = '2'; go.textContent = 'Toca otra vez para abrir';
       return;
     }
-    const n = $('fNum').value.trim();
-    if (n) {
-      navigator.clipboard?.writeText(n).catch(() => {});
-      $('foot').textContent = 'Citation No. copiado: pégalo en el sitio. Luego vuelve aquí y pulsa «Copiar» en Vehicle Tag.';
-    }
-    if (site && go.href === site.href) remember(site.hostname);
+    copyOnOpen();
+    if (site) remember(site.hostname);
   });
+  $('official').addEventListener('click', copyOnOpen);
 
   // Panel inferior: se minimiza deslizando hacia abajo o tocando la barrita, y se amplía al revés
   function setMini(on) {
@@ -618,7 +728,7 @@ window.addEventListener('DOMContentLoaded', () => {
   try { if (localStorage.getItem('multas.mini')) sheet.classList.add('mini'); } catch {}
 
   addEventListener('resize', () => { if (state === 'scanning' && !paper) placeBox(defaultBox()); });
-  window.__test = { judge, parse, fields };
+  window.__test = { judge, parse, fields, parseIssuer, officialSearch, matchesIssuer, issuer };
   placeBox(defaultBox(), false);
   startCamera();
 });
