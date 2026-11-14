@@ -178,6 +178,7 @@
   // ---------- Datos de la multa ----------
   const NUM_RE = /(?:folio|boleta|boleto|citaci[oó]n|citation|ticket|notice|summons|infracci[oó]n|violation|multa)\s*(?:no|n[uú]m(?:ero)?|number|#|n[°º])?\.?\s*[:#]?\s*([A-Z0-9][A-Z0-9-]{5,17})\b/i;
   const PLATE_RE = /\b(?:vehicle\s*tag|veh\.?\s*tag|tag|placas?|plate|tablilla|matr[ií]cula|patente|lic(?:ense)?\.?\s*(?:plate|no)?)\b\s*(?:no|n[uú]m(?:ero)?|number|#)?\.?\s*[:#]?\s*([A-Z0-9][A-Z0-9 -]{3,9}[A-Z0-9])\b/i;
+  const TAG_RE = /\b(?:vehicle\s*|veh\.?\s*)?tag\s*(?:number|num\.?|no\.?|#)\s*[:#]?\s*([A-Z0-9][A-Z0-9 -]{3,9}[A-Z0-9])\b/i;
   const info = { num: '', plate: '' };
   const votes = { num: new Map(), plate: new Map() };
   function vote(kind, v) {
@@ -186,7 +187,7 @@
   }
   const sure = kind => (votes[kind].get(info[kind]) || 0) >= 2;
   function readInfo(text) {
-    const n = text.match(NUM_RE), p = text.match(PLATE_RE);
+    const n = text.match(NUM_RE), p = text.match(TAG_RE) || text.match(PLATE_RE);   // «Tag Number» manda sobre cualquier otra etiqueta
     if (n && /\d/.test(n[1])) vote('num', n[1].toUpperCase());
     else {
       // sin etiqueta reconocible: el código largo con más cifras de la hoja
