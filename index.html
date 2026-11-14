@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0d1512">
+<meta name="referrer" content="no-referrer">
 <title>Escáner de multas</title>
 <style>
   /* Layout: cámara a pantalla completa, marco guía al centro, panel de estado abajo */
@@ -39,7 +40,7 @@
   #frame i:nth-child(2) { right: -2px; top: -2px; border-left: 0; border-bottom: 0; border-top-right-radius: 14px; }
   #frame i:nth-child(3) { left: -2px; bottom: -2px; border-right: 0; border-top: 0; border-bottom-left-radius: 14px; }
   #frame i:nth-child(4) { right: -2px; bottom: -2px; border-left: 0; border-top: 0; border-bottom-right-radius: 14px; }
-  #frame.reading i { border-color: var(--warn); }
+  #frame.framed i { border-color: var(--ok); border-width: 6px; }
   #frame.found i { border-color: var(--ok); }
   #scanline {
     position: absolute; left: 6%; right: 6%; top: 0; height: 2px; background: var(--ok); opacity: .8;
@@ -56,6 +57,13 @@
   }
   #torch svg { width: 26px; height: 26px; }
   #torch[aria-pressed="true"] { background: var(--warn); border-color: var(--warn); color: #2a1c00; }
+  #fields { display: grid; grid-template-columns: 1fr auto; gap: 8px 10px; align-items: end; }
+  #fields label { display: flex; flex-direction: column; gap: 3px; font-size: .8rem; color: var(--muted); min-width: 0; }
+  #fields input {
+    width: 100%; min-height: 48px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--fg); font: 700 1.2rem ui-monospace, Menlo, monospace; letter-spacing: .04em;
+  }
+  #fields button { flex: none; min-width: 96px; }
   #data { margin: 0; font-size: .95rem; }
   #data b { font-variant-numeric: tabular-nums; letter-spacing: .02em; }
 
@@ -104,10 +112,16 @@
 
     <p id="data" hidden></p>
 
+    <div id="fields" hidden>
+      <label for="fnum">Número de multa<input id="fnum" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false"></label>
+      <button id="copy">Copiar</button>
+      <label for="fplate">Placa<input id="fplate" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false"></label>
+      <button id="copyPlate">Copiar</button>
+    </div>
+
     <div class="row">
       <button id="start" class="primary" hidden>Activar cámara</button>
-      <button id="copy" hidden>Copiar número</button>
-      <a id="go" class="btn primary" hidden rel="noopener">Abrir ahora</a>
+      <a id="go" class="btn primary" hidden rel="noopener noreferrer">Abrir ahora</a>
       <a id="search" class="btn primary" hidden rel="noopener">Buscar dónde pagar</a>
       <button id="cancel" hidden>Cancelar</button>
       <button id="again" hidden>Escanear otra</button>
@@ -163,14 +177,28 @@
 
   // ---------- Datos de la multa ----------
   const NUM_RE = /(?:folio|boleta|boleto|citaci[oó]n|citation|ticket|notice|summons|infracci[oó]n|violation|multa)\s*(?:no|n[uú]m(?:ero)?|number|#|n[°º])?\.?\s*[:#]?\s*([A-Z0-9][A-Z0-9-]{5,17})\b/i;
-  const PLATE_RE = /(?:placas?|plate|tablilla|matr[ií]cula|patente|lic(?:ense)?\.?\s*(?:plate|no)?)\s*(?:no|n[uú]m(?:ero)?|number|#)?\.?\s*[:#]?\s*([A-Z0-9][A-Z0-9 -]{3,9}[A-Z0-9])\b/i;
+  const PLATE_RE = /(?:placas?|plate|tag|tablilla|matr[ií]cula|patente|lic(?:ense)?\.?\s*(?:plate|no)?)\s*(?:no|n[uú]m(?:ero)?|number|#)?\.?\s*[:#]?\s*([A-Z0-9][A-Z0-9 -]{3,9}[A-Z0-9])\b/i;
   const info = { num: '', plate: '' };
+  const votes = { num: new Map(), plate: new Map() };
+  function vote(kind, v) {
+    const m = votes[kind]; m.set(v, (m.get(v) || 0) + 1);
+    info[kind] = [...m].sort((a, b) => b[1] - a[1])[0][0];
+  }
+  const sure = kind => (votes[kind].get(info[kind]) || 0) >= 2;
   function readInfo(text) {
     const n = text.match(NUM_RE), p = text.match(PLATE_RE);
-    if (n && /\d/.test(n[1])) info.num = n[1].toUpperCase();
-    if (p && /\d/.test(p[1])) info.plate = p[1].toUpperCase().trim();
+    if (n && /\d/.test(n[1])) vote('num', n[1].toUpperCase());
+    else {
+      // sin etiqueta reconocible: el código largo con más cifras de la hoja
+      const c = (text.toUpperCase().match(/\b[A-Z0-9][A-Z0-9-]{6,15}\b/g) || [])
+        .filter(t => (t.match(/\d/g) || []).length >= 6 && !/^\d{1,2}-\d{1,2}-\d{2,4}$/.test(t))
+        .sort((a, b) => b.length - a.length)[0];
+      if (c && !votes.num.size) info.num = info.num || c;
+    }
+    if (p && /\d/.test(p[1])) vote('plate', p[1].toUpperCase().replace(/\s+/g, ' ').trim());
     showInfo();
   }
+  function resetInfo() { info.num = info.plate = ''; votes.num.clear(); votes.plate.clear(); showInfo(); }
   function showInfo() {
     const el = $('data');
     el.textContent = '';
@@ -179,12 +207,12 @@
       if (el.childNodes.length) el.append('  ·  ');
       el.append(label); const b = document.createElement('b'); b.textContent = v; el.append(b);
     }
-    el.hidden = !el.childNodes.length;
+    el.hidden = !el.childNodes.length || !$('fields').hidden;
   }
   // ---------- Interfaz ----------
   function say(status, detail = '') { $('status').textContent = status; $('detail').textContent = detail; }
   function show(ids) {
-    for (const id of ['start', 'go', 'search', 'cancel', 'again', 'result', 'copy']) $(id).hidden = !ids.includes(id);
+    for (const id of ['start', 'go', 'search', 'cancel', 'again', 'result', 'fields']) $(id).hidden = !ids.includes(id);
   }
 
   // ---------- Cámara ----------
@@ -257,10 +285,11 @@
   };
 
   function beginScan() {
-    state = 'scanning'; seen.clear(); textHits = 0; lastText = ''; info.num = info.plate = ''; showInfo();
+    state = 'scanning'; seen.clear(); textHits = 0; lastText = ''; framedHits = 0; pending = null; clearTimeout(collectTimer); resetInfo();
     frame.className = '';
     show([]);
     say('Apunta a la multa', 'Encuadra la hoja dentro del marco. No hace falta tocar nada.');
+    $('go').textContent = 'Abrir ahora'; $('go').removeAttribute('target');
     requestAnimationFrame(qrLoop);
     ocrLoop();
   }
@@ -283,6 +312,34 @@
     return canvas;
   }
 
+  // ---------- ¿Está la hoja bien encuadrada? ----------
+  // La hoja es más clara que lo que la rodea: se mira qué parte del marco ocupa
+  let framedHits = 0;
+  function checkFraming(img) {
+    const vr = video.getBoundingClientRect(), fr = frame.getBoundingClientRect();
+    const W = img.width, H = img.height, d = img.data;
+    const x0 = (fr.left - vr.left) / vr.width * W, x1 = (fr.right - vr.left) / vr.width * W;
+    const y0 = (fr.top - vr.top) / vr.height * H, y1 = (fr.bottom - vr.top) / vr.height * H;
+    const step = Math.max(4, Math.round(W / 60));
+    const lum = [];
+    for (let y = y0 + step; y < y1 - step; y += step)
+      for (let x = x0 + step; x < x1 - step; x += step) {
+        const i = ((y | 0) * W + (x | 0)) * 4;
+        lum.push(0.3 * d[i] + 0.59 * d[i + 1] + 0.11 * d[i + 2]);
+      }
+    if (!lum.length) return;
+    const sorted = [...lum].sort((a, b) => a - b);
+    const top = sorted[Math.floor(sorted.length * 0.9)];
+    const paper = lum.filter(v => v > Math.max(95, top * 0.72)).length / lum.length;
+    framedHits = paper > 0.62 && top > 110 ? Math.min(framedHits + 1, 4) : Math.max(framedHits - 1, 0);
+    const ok = framedHits >= 2;
+    if (state === 'scanning') {
+      frame.className = ok ? 'framed' : '';
+      say(ok ? 'Bien encuadrada. Leyendo…' : 'Apunta a la multa',
+          ok ? 'Mantén el teléfono quieto un momento.' : 'Acerca la hoja hasta que llene el marco. Se pondrá verde.');
+    }
+  }
+
   // ---------- Código QR: rápido, en cada pasada ----------
   let lastQr = 0;
   function qrLoop(t) {
@@ -292,6 +349,7 @@
       const c = grab(1000, true);
       if (c) {
         const img = ctx.getImageData(0, 0, c.width, c.height);
+        checkFraming(img);
         const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
         if (code && code.data) {
           // Un QR que ya es una dirección se abre tal cual, sin recortar ni corregir nada
@@ -299,11 +357,31 @@
           let u = null;
           if (/^https?:\/\/\S+$/i.test(raw)) { try { u = new URL(raw); } catch {} }
           if (!u) u = findUrls(raw)[0] || null;
-          if (u) { readInfo(code.data); return found(u, 'del código QR'); }
+          if (u) return collect(u, 'del código QR');
         }
       }
     }
     requestAnimationFrame(qrLoop);
+  }
+
+  // Con el sitio ya encontrado, se sigue leyendo unos segundos para sacar número y placa
+  const COLLECT_MS = 8000;
+  let pending = null, collectTimer = null;
+  function collect(url, how) {
+    if (state !== 'scanning') return;
+    state = 'collect';
+    pending = { url, how };
+    frame.className = 'framed';
+    if (navigator.vibrate) { try { navigator.vibrate(60); } catch {} }
+    say('Sitio de pago encontrado. Leyendo número y placa…', 'Mantén la hoja dentro del marco unos segundos más.');
+    collectTimer = setTimeout(finish, COLLECT_MS);
+    ocrLoop();
+  }
+  function finish() {
+    clearTimeout(collectTimer);
+    if (state !== 'collect' || !pending) return;
+    state = 'scanning';                 // found() exige este estado
+    found(pending.url, pending.how);
   }
 
   // ---------- Texto impreso: más lento, en segundo plano ----------
@@ -312,20 +390,21 @@
     ocrBusy = true;
     try {
       if (!worker) worker = await Tesseract.createWorker('spa');
-      while (state === 'scanning') {
+      while (state === 'scanning' || state === 'collect') {
         const c = grab(1500);
         if (!c) { await new Promise(r => setTimeout(r, 300)); continue; }
         const { data } = await worker.recognize(c);
-        if (state !== 'scanning') break;
+        if (state !== 'scanning' && state !== 'collect') break;
         const text = data.text || '';
-        if (text.replace(/\s/g, '').length > 25) frame.className = 'reading';
         readInfo(text);
+        if (state === 'collect') { if (sure('num') && sure('plate')) finish(); continue; }
         for (const u of findUrls(text)) {
           const n = (seen.get(u.href) || 0) + 1;
           seen.set(u.href, n);
-          if (n >= 3 && await exists(u)) return found(u, 'de la dirección impresa');   // tres lecturas iguales y el sitio responde
+          if (n >= 3 && await exists(u)) { collect(u, 'de la dirección impresa'); break; }   // tres lecturas iguales y el sitio responde
           if (n >= 3) seen.set(u.href, -99);                        // no existe: lectura errónea, descartar
         }
+        if (state === 'collect') continue;
         if (TICKET_RE.test(text)) {
           lastText = text;
           if (++textHits >= 4) return noUrl();
@@ -349,17 +428,29 @@
     if (state !== 'scanning') return;
     state = 'found';
     frame.className = 'found';
-    if (navigator.vibrate) navigator.vibrate(60);
     const official = isOfficial(url.hostname);
     const d = $('domain');
     d.textContent = url.hostname;
     d.className = official ? 'ok' : 'warn';
     $('go').href = url.href;
-    show(info.num ? ['result', 'go', 'cancel', 'copy'] : ['result', 'go', 'cancel']);
-    if (info.num) navigator.clipboard?.writeText(info.num).catch(() => {});
-    say('Multa leída. Abriendo el sitio de pago…',
-        (official ? 'Sitio oficial de gobierno' : 'No es un dominio .gov/.gob: comprueba que sea el de tu ciudad antes de pagar')
-        + ' · leído ' + how + '.');
+    $('barfill').style.width = '0';
+    const origin = (official ? 'Sitio oficial de gobierno' : 'No es un dominio .gov/.gob: comprueba que sea el de tu ciudad antes de pagar')
+        + ' · leído ' + how + '.';
+
+    if (info.num || info.plate) {
+      // Hay datos que pegar: se abre en otra pestaña para poder volver aquí a copiar el segundo
+      $('fnum').value = info.num; $('fplate').value = info.plate;
+      $('go').textContent = info.num ? 'Copiar multa y abrir pago' : 'Abrir sitio de pago';
+      $('go').target = '_blank';
+      show(['result', 'fields', 'go', 'again']);
+      showInfo();
+      say('Multa leída. Revisa los datos y abre el pago',
+          'El botón copia el número de multa: pégalo en el sitio. Para la placa, vuelve a esta pestaña y pulsa «Copiar». ' + origin);
+      return;
+    }
+
+    show(['result', 'go', 'cancel']);
+    say('No pude leer el número ni la placa. Abriendo el sitio de pago…', origin);
     const t0 = performance.now(), fill = $('barfill');
     (function tick() {
       if (state !== 'found') return;
@@ -370,13 +461,29 @@
     })();
   }
 
+  async function copyText(text, btn, label) {
+    if (!text) return;
+    try { await navigator.clipboard.writeText(text); btn.textContent = 'Copiado ✓'; }
+    catch { btn.textContent = 'Copia a mano'; }
+    setTimeout(() => { btn.textContent = label; }, 2500);
+  }
+  $('go').addEventListener('click', () => {
+    if ($('go').target !== '_blank') return;
+    const n = $('fnum').value.trim();
+    if (n) navigator.clipboard?.writeText(n).catch(() => {});
+    say(n ? 'Número de multa copiado' : 'Sitio de pago abierto',
+        'Pégalo en el sitio de pago. Para la placa, vuelve a esta pestaña, pulsa «Copiar» junto a la placa y pégala.');
+  });
+
   function noUrl() {
     state = 'stopped';
     frame.className = 'found';
     const lines = lastText.split('\n').map(s => s.trim()).filter(s => /[a-záéíóúñ]{4,}/i.test(s));
     const agency = (lines.find(s => /ciudad|city|municip|ayuntamiento|county|condado|estado|state|polic|tr[aá]nsito|parking|autoridad|department|departamento/i.test(s)) || lines[0] || '').slice(0, 60);
     $('search').href = 'https://duckduckgo.com/?q=' + encodeURIComponent('pagar multa en línea sitio oficial ' + agency);
-    show(info.num ? ['search', 'again', 'copy'] : ['search', 'again']);
+    $('fnum').value = info.num; $('fplate').value = info.plate;
+    show(info.num || info.plate ? ['fields', 'search', 'again'] : ['search', 'again']);
+    showInfo();
     say('Leí la multa, pero no trae dirección web ni código QR',
         agency ? 'Emisor detectado: ' + agency + '. Busca el sitio oficial y entra solo si es el de tu ciudad.' : 'Busca el sitio oficial de la entidad que la emitió.');
   }
@@ -385,7 +492,7 @@
     cancelAnimationFrame(timer);
     state = 'stopped';
     $('barfill').style.width = '0';
-    show(info.num ? ['result', 'go', 'again', 'copy'] : ['result', 'go', 'again']);
+    show(['result', 'go', 'again']);
     say('Apertura cancelada', 'Puedes abrir el sitio con el botón o escanear otra multa.');
   };
   $('again').onclick = beginScan;
@@ -396,11 +503,8 @@
     }
     startCamera();
   };
-  $('copy').onclick = async () => {
-    try { await navigator.clipboard.writeText(info.num); $('copy').textContent = 'Copiado'; }
-    catch { $('copy').textContent = info.num; }
-    setTimeout(() => { $('copy').textContent = 'Copiar número'; }, 2500);
-  };
+  $('copy').onclick = () => copyText($('fnum').value.trim(), $('copy'), 'Copiar');
+  $('copyPlate').onclick = () => copyText($('fplate').value.trim(), $('copyPlate'), 'Copiar');
 
   // Al volver desde el sitio de pago, seguir escaneando
   window.addEventListener('pageshow', e => { if (e.persisted && stream) beginScan(); });
