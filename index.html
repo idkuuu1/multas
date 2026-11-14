@@ -3,516 +3,573 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0d1512">
+<meta name="theme-color" content="#000000">
 <meta name="referrer" content="no-referrer">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Escáner de multas</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <style>
-  /* Layout: cámara a pantalla completa, marco guía al centro, panel de estado abajo */
+  /* Cámara a pantalla completa; marco que se ajusta a la hoja; hoja inferior de cristal con los tres pasos */
   :root {
-    --bg: #0d1512;
-    --panel: #14201b;
-    --fg: #eef5f0;
-    --muted: #9db3a8;
-    --line: #2b3d35;
-    --ok: #3ddc84;
-    --warn: #ffc247;
-    --bad: #ff6b5e;
-    --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --glass: rgba(28, 28, 30, .72);
+    --glass-2: rgba(118, 118, 128, .24);
+    --fg: #ffffff;
+    --muted: rgba(235, 235, 245, .62);
+    --hair: rgba(84, 84, 88, .55);
+    --blue: #0a84ff;
+    --green: #30d158;
+    --amber: #ffd60a;
+    --red: #ff453a;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --spring: cubic-bezier(.2, .9, .25, 1);
     color-scheme: dark;
   }
-  * { box-sizing: border-box; }
-  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.4 var(--font); }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; margin: 0; background: #000; color: var(--fg); font: 16px/1.35 var(--font); -webkit-font-smoothing: antialiased; }
   [hidden] { display: none !important; }
+  button, a { font: inherit; color: inherit; }
 
   #stage { position: fixed; inset: 0; overflow: hidden; background: #000; }
-  #video { width: 100%; height: 100%; object-fit: cover; }
+  #video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 
-  #frame {
-    position: absolute; left: 50%; top: 42%;
-    width: min(84vw, 520px); aspect-ratio: 3 / 4; max-height: 62vh;
-    transform: translate(-50%, -50%);
-    border-radius: 14px;
-    box-shadow: 0 0 0 200vmax rgba(5, 10, 8, .55);
-    pointer-events: none;
+  /* Marco: se mueve y cambia de tamaño hasta abrazar la hoja */
+  #box {
+    position: absolute; left: 0; top: 0; width: 100px; height: 100px; border-radius: 22px;
+    box-shadow: 0 0 0 200vmax rgba(0, 0, 0, .42);
+    transition: transform .38s var(--spring), width .38s var(--spring), height .38s var(--spring), opacity .3s;
+    pointer-events: none; overflow: hidden; will-change: transform, width, height;
   }
-  #frame i { position: absolute; width: 34px; height: 34px; border: 4px solid var(--fg); transition: border-color .2s; }
-  #frame i:nth-child(1) { left: -2px; top: -2px; border-right: 0; border-bottom: 0; border-top-left-radius: 14px; }
-  #frame i:nth-child(2) { right: -2px; top: -2px; border-left: 0; border-bottom: 0; border-top-right-radius: 14px; }
-  #frame i:nth-child(3) { left: -2px; bottom: -2px; border-right: 0; border-top: 0; border-bottom-left-radius: 14px; }
-  #frame i:nth-child(4) { right: -2px; bottom: -2px; border-left: 0; border-top: 0; border-bottom-right-radius: 14px; }
-  #frame.framed i { border-color: var(--ok); border-width: 6px; }
-  #frame.found i { border-color: var(--ok); }
-  #scanline {
-    position: absolute; left: 6%; right: 6%; top: 0; height: 2px; background: var(--ok); opacity: .8;
-    animation: sweep 2.4s ease-in-out infinite alternate;
+  #box i { position: absolute; width: 30px; height: 30px; border: 3.5px solid #fff; transition: border-color .25s, width .3s var(--spring), height .3s var(--spring); }
+  #box i:nth-child(1) { left: 0; top: 0; border-right: 0; border-bottom: 0; border-top-left-radius: 22px; }
+  #box i:nth-child(2) { right: 0; top: 0; border-left: 0; border-bottom: 0; border-top-right-radius: 22px; }
+  #box i:nth-child(3) { left: 0; bottom: 0; border-right: 0; border-top: 0; border-bottom-left-radius: 22px; }
+  #box i:nth-child(4) { right: 0; bottom: 0; border-left: 0; border-top: 0; border-bottom-right-radius: 22px; }
+  #box.locked i { border-color: var(--green); width: 42px; height: 42px; }
+  #beam {
+    position: absolute; left: 0; right: 0; top: 0; height: 38%;
+    background: linear-gradient(to bottom, rgba(255,255,255,0), rgba(255,255,255,.16) 85%, rgba(255,255,255,.75));
+    animation: beam 1.9s cubic-bezier(.45, 0, .55, 1) infinite;
   }
-  #frame.found #scanline { display: none; }
-  @keyframes sweep { to { top: 100%; } }
-  @media (prefers-reduced-motion: reduce) { #scanline { animation: none; top: 50%; } }
+  #box.locked #beam { background: linear-gradient(to bottom, rgba(48,209,88,0), rgba(48,209,88,.16) 85%, rgba(48,209,88,.8)); }
+  #box.done #beam { display: none; }
+  @keyframes beam { from { transform: translateY(-100%); } to { transform: translateY(265%); } }
+  @media (prefers-reduced-motion: reduce) { #beam { animation: none; display: none; } #box { transition: none; } }
 
-  #torch {
-    position: absolute; right: max(16px, env(safe-area-inset-right, 0px)); top: calc(16px + env(safe-area-inset-top, 0px));
-    flex: none; width: 56px; height: 56px; min-height: 0; padding: 0; border-radius: 50%;
-    background: rgba(13, 21, 18, .75); border: 1px solid var(--line); color: var(--fg);
-  }
-  #torch svg { width: 26px; height: 26px; }
-  #torch[aria-pressed="true"] { background: var(--warn); border-color: var(--warn); color: #2a1c00; }
-  #fields { display: grid; grid-template-columns: 1fr auto; gap: 8px 10px; align-items: end; }
-  #fields label { display: flex; flex-direction: column; gap: 3px; font-size: .8rem; color: var(--muted); min-width: 0; }
-  #fields input {
-    width: 100%; min-height: 48px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--line);
-    background: var(--bg); color: var(--fg); font: 700 1.2rem ui-monospace, Menlo, monospace; letter-spacing: .04em;
-  }
-  #fields button { flex: none; min-width: 96px; }
-  #data { margin: 0; font-size: .95rem; }
-  #data b { font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+  .glass { background: var(--glass); -webkit-backdrop-filter: saturate(180%) blur(22px); backdrop-filter: saturate(180%) blur(22px); }
 
-  #panel {
-    position: absolute; left: 0; right: 0; bottom: 0;
-    padding: 16px max(16px, env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
-    background: var(--panel); border-top: 1px solid var(--line);
-    border-radius: 18px 18px 0 0;
-    display: flex; flex-direction: column; gap: 10px;
+  #top {
+    position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: calc(12px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 0 max(16px, env(safe-area-inset-left, 0px));
   }
-  #status { margin: 0; font-size: 1.05rem; font-weight: 600; text-wrap: balance; }
-  #detail { margin: 0; color: var(--muted); font-size: .9rem; overflow-wrap: anywhere; }
-  #domain { font-size: 1.25rem; font-weight: 700; overflow-wrap: anywhere; }
-  #domain.ok { color: var(--ok); }
-  #domain.warn { color: var(--warn); }
-  #bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
-  #bar b { display: block; height: 100%; width: 0; background: var(--ok); }
-  .row { display: flex; gap: 10px; flex-wrap: wrap; }
-  button, a.btn {
-    flex: 1 1 140px; min-height: 48px; padding: 0 16px;
-    border-radius: 12px; border: 1px solid var(--line);
-    background: transparent; color: var(--fg); font: 600 1rem var(--font);
-    display: inline-flex; align-items: center; justify-content: center; text-decoration: none;
+  #hint { padding: 9px 15px; border-radius: 999px; font-size: .9rem; font-weight: 600; max-width: 100%; }
+  #torch { flex: none; width: 46px; height: 46px; border-radius: 50%; border: 0; display: grid; place-items: center; }
+  #torch svg { width: 22px; height: 22px; }
+  #torch[aria-pressed="true"] { background: var(--amber); color: #1c1c1e; }
+
+  #sheet {
+    position: absolute; left: 0; right: 0; bottom: 0; border-radius: 26px 26px 0 0;
+    padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+    display: flex; flex-direction: column; gap: 12px; max-height: 78%; overflow-y: auto;
   }
-  button.primary, a.btn.primary { background: var(--ok); border-color: var(--ok); color: #062313; }
-  button:focus-visible, a.btn:focus-visible { outline: 3px solid var(--warn); outline-offset: 2px; }
+  #sheet::before { content: ""; align-self: center; width: 36px; height: 5px; border-radius: 3px; background: var(--glass-2); }
+  h1 { margin: 0; font-size: 1.25rem; font-weight: 700; letter-spacing: -.01em; }
+  #resultView { display: flex; flex-direction: column; gap: 12px; }
+
+  .list { border-radius: 16px; background: var(--glass-2); overflow: hidden; }
+  .item { display: flex; align-items: center; gap: 12px; padding: 11px 12px 11px 14px; min-height: 56px; }
+  .item + .item { border-top: .5px solid var(--hair); }
+  .dot { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; border: 2px solid var(--hair); transition: background .25s, border-color .25s; }
+  .dot svg { width: 14px; height: 14px; opacity: 0; transition: opacity .2s; }
+  .item.busy .dot { border-color: var(--blue); border-right-color: transparent; animation: spin .8s linear infinite; }
+  .item.ok .dot { background: var(--green); border-color: var(--green); color: #04210d; }
+  .item.ok .dot svg { opacity: 1; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .lbl { font-size: .78rem; color: var(--muted); }
+  .val { font-size: 1.02rem; font-weight: 600; overflow-wrap: anywhere; }
+  .val.mono, input.val { font-family: var(--mono); letter-spacing: .03em; }
+  input.val { width: 100%; border: 0; outline: 0; background: transparent; color: var(--fg); padding: 0; font-size: 1.12rem; font-weight: 700; border-radius: 0; }
+  input.val::placeholder { color: var(--muted); font-weight: 500; font-family: var(--font); letter-spacing: 0; font-size: .95rem; }
+
+  .pill { flex: none; min-width: 74px; height: 36px; padding: 0 14px; border-radius: 999px; border: 0; background: var(--glass-2); color: var(--blue); font-weight: 600; font-size: .95rem; }
+  .pill.done { color: var(--green); }
+
+  #verdict { border-radius: 16px; padding: 13px 14px; display: flex; gap: 12px; align-items: flex-start; background: var(--glass-2); }
+  #verdict svg { flex: none; width: 28px; height: 28px; margin-top: 1px; }
+  #verdict b { display: block; font-size: 1rem; }
+  #verdict p { margin: 3px 0 0; font-size: .86rem; font-family: var(--mono); overflow-wrap: anywhere; }
+  #verdict ul { margin: 6px 0 0; padding-left: 18px; font-size: .86rem; color: var(--muted); }
+  #verdict.safe { background: rgba(48, 209, 88, .16); } #verdict.safe svg, #verdict.safe b { color: var(--green); }
+  #verdict.warn { background: rgba(255, 214, 10, .14); } #verdict.warn svg, #verdict.warn b { color: var(--amber); }
+  #verdict.bad { background: rgba(255, 69, 58, .18); } #verdict.bad svg, #verdict.bad b { color: var(--red); }
+
+  .actions { display: flex; gap: 10px; }
+  .btn { flex: 1 1 0; min-height: 52px; border-radius: 15px; border: 0; padding: 0 14px; font-weight: 600; font-size: 1.02rem; display: inline-flex; align-items: center; justify-content: center; text-align: center; text-decoration: none; background: var(--glass-2); color: var(--fg); }
+  .btn.primary { background: var(--blue); color: #fff; flex: 1.6 1 0; }
+  .btn.danger { background: var(--red); }
+  .btn:active, .pill:active, #torch:active { opacity: .7; }
+  :focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+  .foot { margin: 0; font-size: .78rem; color: var(--muted); text-align: center; }
 </style>
 </head>
 <body>
 <div id="stage">
   <video id="video" playsinline muted autoplay></video>
-  <div id="frame"><i></i><i></i><i></i><i></i><div id="scanline"></div></div>
+  <div id="box"><i></i><i></i><i></i><i></i><div id="beam"></div></div>
 
-  <button id="torch" hidden aria-pressed="false" aria-label="Flash">
-    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>
-  </button>
+  <div id="top">
+    <div id="hint" class="glass" aria-live="polite">Abriendo la cámara…</div>
+    <button id="torch" class="glass" hidden aria-pressed="false" aria-label="Flash">
+      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>
+    </button>
+  </div>
 
-  <div id="panel" aria-live="polite">
-    <p id="status">Abriendo la cámara…</p>
-    <p id="detail">Permite el uso de la cámara cuando el navegador lo pida.</p>
-
-    <div id="result" hidden>
-      <div id="domain"></div>
-      <div id="bar"><b id="barfill"></b></div>
+  <div id="sheet" class="glass">
+    <!-- Mientras escanea: los tres pasos, en orden -->
+    <div id="scanView">
+      <div class="list">
+        <div class="item" id="stSite"><span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+          <span class="txt"><span class="lbl">1 · Sitio de pago</span><span class="val" id="vSite">Buscando el código QR…</span></span></div>
+        <div class="item" id="stNum"><span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+          <span class="txt"><span class="lbl">2 · Citation No.</span><span class="val mono" id="vNum">—</span></span></div>
+        <div class="item" id="stTag"><span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+          <span class="txt"><span class="lbl">3 · Tag Number</span><span class="val mono" id="vTag">—</span></span></div>
+      </div>
+      <div class="actions" style="margin-top:12px">
+        <button id="start" class="btn primary" hidden>Activar cámara</button>
+      </div>
     </div>
 
-    <p id="data" hidden></p>
+    <!-- Resultado -->
+    <div id="resultView" hidden>
+      <h1 id="rTitle">Multa leída</h1>
 
-    <div id="fields" hidden>
-      <label for="fnum">Número de multa<input id="fnum" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false"></label>
-      <button id="copy">Copiar</button>
-      <label for="fplate">Placa<input id="fplate" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false"></label>
-      <button id="copyPlate">Copiar</button>
-    </div>
+      <div id="verdict" class="warn">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.3 8 11 4.6-1.7 8-6 8-11V5l-8-3z"/></svg>
+        <div><b id="vdTitle"></b><p id="vdHost"></p><ul id="vdWhy"></ul></div>
+      </div>
 
-    <div class="row">
-      <button id="start" class="primary" hidden>Activar cámara</button>
-      <a id="go" class="btn primary" hidden rel="noopener noreferrer">Abrir ahora</a>
-      <a id="search" class="btn primary" hidden rel="noopener">Buscar dónde pagar</a>
-      <button id="cancel" hidden>Cancelar</button>
-      <button id="again" hidden>Escanear otra</button>
+      <div class="list">
+        <div class="item"><span class="txt"><label class="lbl" for="fNum">Citation No.</label><input class="val" id="fNum" placeholder="No se pudo leer: escríbelo" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false"></span>
+          <button class="pill" id="cNum">Copiar</button></div>
+        <div class="item"><span class="txt"><label class="lbl" for="fTag">Tag Number</label><input class="val" id="fTag" placeholder="No se pudo leer: escríbelo" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false"></span>
+          <button class="pill" id="cTag">Copiar</button></div>
+      </div>
+
+      <div class="actions">
+        <button id="again" class="btn">Escanear otra</button>
+        <a id="go" class="btn primary" target="_blank" rel="noopener noreferrer">Abrir sitio de pago</a>
+      </div>
+      <p class="foot" id="foot"></p>
     </div>
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js" defer></script>
 <script>
-(() => {
+window.addEventListener('DOMContentLoaded', () => {
   const $ = id => document.getElementById(id);
-  const video = $('video'), frame = $('frame');
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const video = $('video'), box = $('box'), sheet = $('sheet');
+  const canvas = document.createElement('canvas'), ctx = canvas.getContext('2d', { willReadFrequently: true });
+  const ocrCanvas = document.createElement('canvas'), octx = ocrCanvas.getContext('2d', { willReadFrequently: true });
+  const FOOT = 'Una multa real nunca se paga con tarjetas de regalo, Zelle ni criptomonedas.';
 
-  const COUNTDOWN_MS = 3000;
-  let state = 'idle';            // idle | scanning | found | stopped
-  let worker = null, ocrBusy = false, timer = null;
-  const seen = new Map();        // url -> veces leída por OCR
-  let textHits = 0, lastText = '';
-
-  // ---------- Reconocer direcciones web ----------
-  const TLD = 'gov|gob|com|org|net|us|mx|es|pr|do|co|ar|cl|pe|ec|uy|py|bo|ve|gt|sv|hn|ni|cr|pa|cu|br|ca|uk|eu|info|app|io';
-  const URL_RE = new RegExp(
-    '(?:https?:\\/\\/)?(?:[a-z0-9-]+\\.)+(?:' + TLD + ')(?:\\.[a-z]{2})?(?:\\/[\\w\\-.~%/?=&#+]*)?', 'gi');
-  const PAY_RE = /pag|pay|multa|ticket|citation|citacion|infrac|violation|fine|parking|transit|estacion/i;
-  const TICKET_RE = /multa|infracci|boleta|citaci|citation|violation|parking|estacionamiento|tr[aá]nsito|notice|fine|placa|plate/i;
-
-  function toUrl(raw) {
-    let s = raw.trim().replace(/[.,;:)\]]+$/, '');
-    if (!/^https?:\/\//i.test(s)) s = 'https://' + s;
-    try {
-      const u = new URL(s);
-      if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
-      if (!u.hostname.includes('.')) return null;
-      if (u.protocol === 'http:') u.protocol = 'https:';
-      u.hostname = u.hostname.replace(/^[wv]{2,6}\./i, 'www.');
-      return u;
-    } catch { return null; }
-  }
-  function findUrls(text) {
-    const out = [];
-    for (const m of text.replace(/\s*([./])\s*/g, '$1').matchAll(URL_RE)) {
-      if (/@$/.test(text.slice(0, m.index))) continue;          // correo, no web
-      const u = toUrl(m[0]);
-      if (u) out.push(u);
+  // ============ 1. Datos de la multa: solo «Citation No» y «Tag Number» ============
+  const NUM_RE = /\bcitation[ \t]*(?:n[o0]|number|num|#)?[.:#\s-]*(?!citation)([A-Z0-9][A-Z0-9-]{4,17})\b/i;
+  const TAG_RE = /\btag\s*(?:number|num|n[o0]|#)[.:#\s-]*([A-Z0-9][A-Z0-9 -]{2,9}[A-Z0-9])\b/i;
+  const clean = { num: v => v.toUpperCase().replace(/\s+/g, ''), tag: v => v.toUpperCase().replace(/\s+/g, ' ').trim() };
+  const fields = {
+    num: { re: NUM_RE, votes: new Map(), value: '', zone: null, tries: 0 },
+    tag: { re: TAG_RE, votes: new Map(), value: '', zone: null, tries: 0 }
+  };
+  const LABEL = { num: /\bcitation\b/i, tag: /\btag\s*(number|num|n[o0]|#)/i };
+  function parse(kind, text) {
+    // La palabra puede salir antes en un título («PARKING CITATION»): vale la primera que traiga cifras
+    for (const m of text.matchAll(new RegExp(fields[kind].re.source, 'gi'))) {
+      if ((m[1].match(/\d/g) || []).length >= (kind === 'num' ? 3 : 1)) return clean[kind](m[1]);
     }
-    // primero las que parecen de pago
-    return out.sort((a, b) => PAY_RE.test(b.href) - PAY_RE.test(a.href));
+    return '';
   }
-  const isOfficial = host => /\.(gov|gob)(\.[a-z]{2})?$/i.test(host) || /\.(gov|gob)\./i.test(host);
-
-  // ---------- Datos de la multa ----------
-  const NUM_RE = /(?:folio|boleta|boleto|citaci[oó]n|citation|ticket|notice|summons|infracci[oó]n|violation|multa)\s*(?:no|n[uú]m(?:ero)?|number|#|n[°º])?\.?\s*[:#]?\s*([A-Z0-9][A-Z0-9-]{5,17})\b/i;
-  const PLATE_RE = /\b(?:vehicle\s*tag|veh\.?\s*tag|tag|placas?|plate|tablilla|matr[ií]cula|patente|lic(?:ense)?\.?\s*(?:plate|no)?)\b\s*(?:no|n[uú]m(?:ero)?|number|#)?\.?\s*[:#]?\s*([A-Z0-9][A-Z0-9 -]{3,9}[A-Z0-9])\b/i;
-  const TAG_RE = /\b(?:vehicle\s*|veh\.?\s*)?tag\s*(?:number|num\.?|no\.?|#)\s*[:#]?\s*([A-Z0-9][A-Z0-9 -]{3,9}[A-Z0-9])\b/i;
-  const info = { num: '', plate: '' };
-  const votes = { num: new Map(), plate: new Map() };
   function vote(kind, v) {
-    const m = votes[kind]; m.set(v, (m.get(v) || 0) + 1);
-    info[kind] = [...m].sort((a, b) => b[1] - a[1])[0][0];
+    if (!v) return;
+    const f = fields[kind];
+    f.votes.set(v, (f.votes.get(v) || 0) + 1);
+    f.value = [...f.votes].sort((a, b) => b[1] - a[1])[0][0];
   }
-  const sure = kind => (votes[kind].get(info[kind]) || 0) >= 2;
-  function readInfo(text) {
-    const n = text.match(NUM_RE), p = text.match(TAG_RE) || text.match(PLATE_RE);   // «Tag Number» manda sobre cualquier otra etiqueta
-    if (n && /\d/.test(n[1])) vote('num', n[1].toUpperCase());
-    else {
-      // sin etiqueta reconocible: el código largo con más cifras de la hoja
-      const c = (text.toUpperCase().match(/\b[A-Z0-9][A-Z0-9-]{6,15}\b/g) || [])
-        .filter(t => (t.match(/\d/g) || []).length >= 6 && !/^\d{1,2}-\d{1,2}-\d{2,4}$/.test(t))
-        .sort((a, b) => b.length - a.length)[0];
-      if (c && !votes.num.size) info.num = info.num || c;
+  const sure = kind => (fields[kind].votes.get(fields[kind].value) || 0) >= 2;
+
+  // ============ 2. ¿Es de fiar el sitio? ============
+  const REDIRECTORS = /(^|\.)(w69b\.com|bit\.ly|tinyurl\.com|t\.co|goo\.gl|qrco\.de|rebrand\.ly|qr\.io|me-qr\.com|l\.ead\.me|flow\.page|qrfy\.com|scan\.page|is\.gd|cutt\.ly|ow\.ly|page\.link|qr-code-generator\.com|q-r\.to)$/i;
+  const BAD_TLD = /\.(zip|top|xyz|click|tk|ml|ga|cf|gq|icu|cam|rest|buzz|cfd|sbs|quest|monster|work|support|loan|win|bid|vip|shop|online|site|live|lol|mom)$/i;
+  const GOV = /(\.gov|\.mil|\.state\.[a-z]{2}\.us|\.(ci|co|city|county|town|village)\.[a-z-]+\.[a-z]{2}\.us)$/i;
+  function seenBefore(host) { try { return (JSON.parse(localStorage.getItem('multas.sitios') || '{}'))[host] || 0; } catch { return 0; } }
+  function remember(host) { try { const m = JSON.parse(localStorage.getItem('multas.sitios') || '{}'); m[host] = (m[host] || 0) + 1; localStorage.setItem('multas.sitios', JSON.stringify(m)); } catch {} }
+
+  function judge(url) {
+    const host = url.hostname.toLowerCase(), why = [], bad = [];
+    let level = 'warn';
+    const name = host.split('.').slice(0, -1).join('.');
+    if (url.protocol !== 'https:') bad.push('No usa conexión segura (https).');
+    if (/^\d+(\.\d+){3}$/.test(host)) bad.push('La dirección es un número (IP), no un nombre de sitio.');
+    if (host.includes('xn--')) bad.push('El nombre usa letras disfrazadas para parecerse a otro sitio.');
+    if (url.username) bad.push('La dirección esconde el sitio real detrás de una «@».');
+    if (BAD_TLD.test(host)) bad.push('Termina en una extensión muy usada en estafas (.' + host.split('.').pop() + ').');
+    if (!GOV.test(host) && /(^|[.-])(gov|dmv|irs)([.-]|$)/i.test(name)) bad.push('Usa «gov» o «dmv» en el nombre sin ser un dominio oficial .gov.');
+    if (host.split('.').length > 5) bad.push('Tiene demasiados subdominios, algo típico de sitios falsos.');
+
+    if (bad.length) { level = 'bad'; why.push(...bad); }
+    else if (GOV.test(host)) { level = 'safe'; why.push('Termina en un dominio reservado al gobierno de EE. UU., que un estafador no puede registrar.', 'Usa conexión segura (https).'); }
+    else if (REDIRECTORS.test(host)) {
+      why.push('El QR pasa por un servicio intermedio y no puedo ver el sitio final desde aquí.',
+               'Cuando se abra, mira la barra de direcciones: debe ser un sitio .gov o el de la ciudad o corte que aparece en la multa.');
+    } else {
+      why.push('No es un dominio .gov. Muchas ciudades cobran a través de empresas legítimas, pero no puedo confirmarlo.',
+               'Comprueba que el nombre de la ciudad o corte de la multa aparezca en el sitio antes de pagar.');
     }
-    if (p && /\d/.test(p[1])) vote('plate', p[1].toUpperCase().replace(/\s+/g, ' ').trim());
-    showInfo();
-  }
-  function resetInfo() { info.num = info.plate = ''; votes.num.clear(); votes.plate.clear(); showInfo(); }
-  function showInfo() {
-    const el = $('data');
-    el.textContent = '';
-    for (const [label, v] of [['Multa nº ', info.num], ['Placa ', info.plate]]) {
-      if (!v) continue;
-      if (el.childNodes.length) el.append('  ·  ');
-      el.append(label); const b = document.createElement('b'); b.textContent = v; el.append(b);
-    }
-    el.hidden = !el.childNodes.length || !$('fields').hidden;
-  }
-  // ---------- Interfaz ----------
-  function say(status, detail = '') { $('status').textContent = status; $('detail').textContent = detail; }
-  function show(ids) {
-    for (const id of ['start', 'go', 'search', 'cancel', 'again', 'result', 'fields']) $(id).hidden = !ids.includes(id);
+    const n = seenBefore(host);
+    if (n && level !== 'bad') why.push('Ya abriste este mismo sitio ' + n + (n === 1 ? ' vez' : ' veces') + ' desde este teléfono.');
+    const title = { safe: 'Sitio oficial del gobierno', warn: REDIRECTORS.test(host) ? 'No puedo ver el destino final' : 'No puedo confirmar que sea oficial', bad: 'Sospechoso: no pagues aquí' }[level];
+    return { level, title, why, host };
   }
 
-  // ---------- Cámara ----------
-  let stream = null, starting = false;
-  function stopCamera() {
-    if (stream) stream.getTracks().forEach(t => t.stop());
-    stream = null; video.srcObject = null; $('torch').hidden = true;
+  // ============ 3. Interfaz ============
+  const hint = t => { if ($('hint').textContent !== t) $('hint').textContent = t; };
+  function step(id, cls, text) {
+    const el = $(id); el.className = 'item ' + cls;
+    if (text !== undefined) el.querySelector('.val').textContent = text;
   }
+  function placeBox(r, animate = true) {
+    if (!animate) box.style.transition = 'none';
+    box.style.transform = `translate(${r.x}px, ${r.y}px)`;
+    box.style.width = r.w + 'px'; box.style.height = r.h + 'px';
+    if (!animate) { box.offsetWidth; box.style.transition = ''; }
+  }
+  function defaultBox() {
+    const W = innerWidth, top = $('top').getBoundingClientRect().bottom + 14, bottom = sheet.getBoundingClientRect().top - 16;
+    const w = Math.min(W * 0.84, 520), h = Math.max(120, bottom - top);
+    return { x: (W - w) / 2, y: top, w, h };
+  }
+
+  // ============ 4. Cámara ============
+  let stream = null, starting = false, torchOn = false;
+  let state = 'idle';                 // idle | scanning | result
+  let site = null, siteAt = 0, dataAt = 0;
+  let paper = null, steady = false, lockHits = 0;
+
   async function startCamera() {
     if (starting) return;
-    starting = true;
-    show([]);
+    starting = true; $('start').hidden = true;
     try {
       if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
-        say('La cámara solo funciona desde una dirección https',
-            'Abre la página publicada (https://…) en Safari o Chrome. Desde un archivo o una vista previa el navegador la bloquea.');
-        show(['start']);
-        return;
+        hint('La cámara solo funciona desde una dirección https'); $('start').hidden = false; return;
       }
-      say('Abriendo la cámara…', 'Pulsa «Permitir» cuando el navegador lo pida.');
-      stopCamera();
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
-        });
-      } catch (e) {
-        if (e.name === 'OverconstrainedError' || e.name === 'NotFoundError') {
-          try { stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true }); } catch (e2) { e = e2; }
-        }
+      hint('Abriendo la cámara…');
+      if (stream) stream.getTracks().forEach(t => t.stop());
+      stream = null;
+      const tryGet = c => navigator.mediaDevices.getUserMedia({ audio: false, video: c });
+      try { stream = await tryGet({ facingMode: { ideal: 'environment' }, width: { ideal: 2560 }, height: { ideal: 1440 } }); }
+      catch (e) {
+        try { if (e.name !== 'NotAllowedError') stream = await tryGet(true); } catch {}
         if (!stream) {
-          const why = {
-            NotAllowedError: 'El permiso de cámara está denegado. En iPhone: toca «aA» o el icono junto a la dirección → Ajustes del sitio web → Cámara → Permitir, y pulsa el botón.',
-            NotFoundError: 'No se encontró ninguna cámara en este dispositivo.',
-            NotReadableError: 'Otra app está usando la cámara. Ciérrala y pulsa el botón.'
-          }[e.name] || 'Pulsa el botón para intentarlo de nuevo. (' + e.name + ')';
-          say('No se pudo abrir la cámara', why);
-          show(['start']);
-          return;
+          hint({ NotAllowedError: 'Permiso de cámara denegado. Actívalo en «aA» → Ajustes del sitio web → Cámara',
+                 NotReadableError: 'Otra app está usando la cámara' }[e.name] || 'No se pudo abrir la cámara');
+          $('start').hidden = false; return;
         }
       }
       video.srcObject = stream;
-      try { await video.play(); }
-      catch { say('Cámara lista', 'Pulsa el botón para empezar.'); show(['start']); $('start').dataset.play = '1'; return; }
-      setupTorch();
+      try { await video.play(); } catch { hint('Pulsa «Activar cámara»'); $('start').hidden = false; return; }
+      const track = stream.getVideoTracks()[0];
+      try { await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch {}
+      torchOn = false; $('torch').setAttribute('aria-pressed', 'false'); $('torch').hidden = false;
       beginScan();
     } finally { starting = false; }
   }
-
-  // ---------- Flash ----------
-  let torchOn = false;
-  function setupTorch() {
-    torchOn = false;
-    $('torch').setAttribute('aria-pressed', 'false');
-    $('torch').hidden = false;
-  }
+  $('start').onclick = startCamera;
   $('torch').onclick = async () => {
     const track = stream && stream.getVideoTracks()[0];
     if (!track) return;
     try {
       await track.applyConstraints({ advanced: [{ torch: !torchOn }] });
-      const on = track.getSettings ? track.getSettings().torch : undefined;
-      if (on === undefined && !(track.getCapabilities && track.getCapabilities().torch)) throw new Error('sin flash');
-      torchOn = on === undefined ? !torchOn : on;
+      const s = track.getSettings ? track.getSettings().torch : undefined;
+      if (s === undefined && !(track.getCapabilities && track.getCapabilities().torch)) throw 0;
+      torchOn = s === undefined ? !torchOn : s;
       $('torch').setAttribute('aria-pressed', String(torchOn));
-    } catch {
-      $('torch').hidden = true;
-      if (state === 'scanning') say('Apunta a la multa', 'Este navegador o esta cámara no permite encender el flash desde una página web.');
-    }
+    } catch { $('torch').hidden = true; hint('Este navegador no permite encender el flash'); }
   };
 
   function beginScan() {
-    state = 'scanning'; seen.clear(); textHits = 0; lastText = ''; framedHits = 0; pending = null; clearTimeout(collectTimer); resetInfo();
-    frame.className = '';
-    show([]);
-    say('Apunta a la multa', 'Encuadra la hoja dentro del marco. No hace falta tocar nada.');
-    $('go').textContent = 'Abrir ahora'; $('go').removeAttribute('target');
-    requestAnimationFrame(qrLoop);
+    state = 'scanning'; site = null; siteAt = dataAt = 0;
+    paper = null; lockHits = 0; steady = false; prevGrid = null;
+    for (const f of Object.values(fields)) { f.votes.clear(); f.value = ''; f.zone = null; f.tries = 0; }
+    $('resultView').hidden = true; $('scanView').hidden = false;
+    step('stSite', 'busy', 'Buscando el código QR…'); step('stNum', '', '—'); step('stTag', '', '—');
+    box.className = '';
+    requestAnimationFrame(() => { placeBox(defaultBox(), false); });
+    hint('Apunta a la multa');
+    requestAnimationFrame(fastLoop);
     ocrLoop();
   }
+  $('again').onclick = beginScan;
 
-  // Recorta lo que cae dentro del marco guía
-  function grab(maxSide, whole) {
+  // Dibuja en un lienzo la parte del vídeo que cae en un rectángulo de pantalla
+  function grab(rect, maxSide, target = canvas, c2d = ctx) {
     const vw = video.videoWidth, vh = video.videoHeight;
     if (!vw || !vh) return null;
-    const vr = video.getBoundingClientRect(), fr = whole ? vr : frame.getBoundingClientRect();
-    const scale = Math.max(vr.width / vw, vr.height / vh);           // object-fit: cover
+    const vr = video.getBoundingClientRect();
+    const scale = Math.max(vr.width / vw, vr.height / vh);
     const offX = (vw * scale - vr.width) / 2, offY = (vh * scale - vr.height) / 2;
-    let sx = (fr.left - vr.left + offX) / scale, sy = (fr.top - vr.top + offY) / scale;
-    let sw = fr.width / scale, sh = fr.height / scale;
-    if (!whole) { const m = 0.15; sx -= sw * m; sy -= sh * m; sw *= 1 + 2 * m; sh *= 1 + 2 * m; }   // margen por si la hoja no está bien centrada
-    sx = Math.max(0, sx); sy = Math.max(0, sy);
+    let sx = (rect.x - vr.left + offX) / scale, sy = (rect.y - vr.top + offY) / scale, sw = rect.w / scale, sh = rect.h / scale;
+    if (sx < 0) { sw += sx; sx = 0; } if (sy < 0) { sh += sy; sy = 0; }
     sw = Math.min(vw - sx, sw); sh = Math.min(vh - sy, sh);
+    if (sw < 8 || sh < 8) return null;
     const k = Math.min(1, maxSide / Math.max(sw, sh));
-    canvas.width = Math.round(sw * k); canvas.height = Math.round(sh * k);
-    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-    return canvas;
+    target.width = Math.round(sw * k); target.height = Math.round(sh * k);
+    c2d.imageSmoothingQuality = 'high';
+    c2d.drawImage(video, sx, sy, sw, sh, 0, 0, target.width, target.height);
+    return { canvas: target, rect: { x: sx * scale - offX + vr.left, y: sy * scale - offY + vr.top, w: sw * scale, h: sh * scale } };
   }
 
-  // ---------- ¿Está la hoja bien encuadrada? ----------
-  // La hoja es más clara que lo que la rodea: se mira qué parte del marco ocupa
-  let framedHits = 0;
-  function checkFraming(img) {
-    const vr = video.getBoundingClientRect(), fr = frame.getBoundingClientRect();
-    const W = img.width, H = img.height, d = img.data;
-    const x0 = (fr.left - vr.left) / vr.width * W, x1 = (fr.right - vr.left) / vr.width * W;
-    const y0 = (fr.top - vr.top) / vr.height * H, y1 = (fr.bottom - vr.top) / vr.height * H;
-    const step = Math.max(4, Math.round(W / 60));
-    const lum = [];
-    for (let y = y0 + step; y < y1 - step; y += step)
-      for (let x = x0 + step; x < x1 - step; x += step) {
-        const i = ((y | 0) * W + (x | 0)) * 4;
-        lum.push(0.3 * d[i] + 0.59 * d[i + 1] + 0.11 * d[i + 2]);
-      }
-    if (!lum.length) return;
-    const sorted = [...lum].sort((a, b) => a - b);
-    const top = sorted[Math.floor(sorted.length * 0.9)];
-    const paper = lum.filter(v => v > Math.max(95, top * 0.72)).length / lum.length;
-    framedHits = paper > 0.62 && top > 110 ? Math.min(framedHits + 1, 4) : Math.max(framedHits - 1, 0);
-    const ok = framedHits >= 2;
-    if (state === 'scanning') {
-      frame.className = ok ? 'framed' : '';
-      say(ok ? 'Bien encuadrada. Leyendo…' : 'Apunta a la multa',
-          ok ? 'Mantén el teléfono quieto un momento.' : 'Acerca la hoja hasta que llene el marco. Se pondrá verde.');
-    }
-  }
-
-  // ---------- Código QR: rápido, en cada pasada ----------
-  let lastQr = 0;
-  function qrLoop(t) {
+  // ============ 5. Bucle rápido: QR + encuadre automático + estabilidad ============
+  let lastFast = 0, prevGrid = null;
+  function fastLoop(t) {
     if (state !== 'scanning') return;
-    if (t - lastQr > 180 && window.jsQR) {
-      lastQr = t;
-      const c = grab(1000, true);
-      if (c) {
-        const img = ctx.getImageData(0, 0, c.width, c.height);
-        checkFraming(img);
-        const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
-        if (code && code.data) {
-          // Un QR que ya es una dirección se abre tal cual, sin recortar ni corregir nada
-          const raw = code.data.trim();
-          let u = null;
-          if (/^https?:\/\/\S+$/i.test(raw)) { try { u = new URL(raw); } catch {} }
-          if (!u) u = findUrls(raw)[0] || null;
-          if (u) return collect(u, 'del código QR');
+    if (t - lastFast > 140) {
+      lastFast = t;
+      const g = grab({ x: 0, y: 0, w: innerWidth, h: innerHeight }, 900);
+      if (g) {
+        const c = g.canvas, img = ctx.getImageData(0, 0, c.width, c.height);
+        track(img);
+        if (!site && window.jsQR) {
+          const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+          if (code && code.data) {
+            const raw = code.data.trim();
+            let u = null;
+            if (/^https?:\/\/\S+$/i.test(raw)) { try { u = new URL(raw); } catch {} }
+            else if (/^(www\.)?[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?$/i.test(raw)) { try { u = new URL('https://' + raw); } catch {} }
+            if (u) foundSite(u);
+          }
         }
       }
+      check();
     }
-    requestAnimationFrame(qrLoop);
+    requestAnimationFrame(fastLoop);
   }
 
-  // Con el sitio ya encontrado, se sigue leyendo unos segundos para sacar número y placa
-  const COLLECT_MS = 8000;
-  let pending = null, collectTimer = null;
-  function collect(url, how) {
-    if (state !== 'scanning') return;
-    state = 'collect';
-    pending = { url, how };
-    frame.className = 'framed';
-    if (navigator.vibrate) { try { navigator.vibrate(60); } catch {} }
-    say('Sitio de pago encontrado. Leyendo número y placa…', 'Mantén la hoja dentro del marco unos segundos más.');
-    collectTimer = setTimeout(finish, COLLECT_MS);
-    ocrLoop();
-  }
-  function finish() {
-    clearTimeout(collectTimer);
-    if (state !== 'collect' || !pending) return;
-    state = 'scanning';                 // found() exige este estado
-    found(pending.url, pending.how);
+  // Localiza la hoja (lo más claro de la imagen) y mueve el marco hasta abrazarla
+  function track(img) {
+    const W = img.width, H = img.height, d = img.data;
+    const top = $('top').getBoundingClientRect().bottom / innerHeight * H;
+    const bottom = sheet.getBoundingClientRect().top / innerHeight * H;
+    const cell = Math.max(6, Math.round(W / 44)), cols = Math.floor(W / cell), rows = Math.floor((bottom - top) / cell);
+    if (rows < 4) return;
+    const g = new Float32Array(cols * rows);
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const i = (((top + r * cell + cell / 2) | 0) * W + ((c * cell + cell / 2) | 0)) * 4;
+      g[r * cols + c] = 0.3 * d[i] + 0.59 * d[i + 1] + 0.11 * d[i + 2];
+    }
+    // estabilidad: cuánto cambió la imagen desde la pasada anterior
+    if (prevGrid && prevGrid.length === g.length) {
+      let diff = 0; for (let i = 0; i < g.length; i++) diff += Math.abs(g[i] - prevGrid[i]);
+      steady = diff / g.length < 7;
+    }
+    prevGrid = g;
+
+    const sorted = Float32Array.from(g).sort(), p90 = sorted[Math.floor(sorted.length * 0.9)];
+    const thr = Math.max(90, p90 * 0.74);
+    const colSum = new Uint16Array(cols), rowSum = new Uint16Array(rows);
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) if (g[r * cols + c] > thr) { colSum[c]++; rowSum[r]++; }
+    const run = (sum, n, need) => {            // tramo seguido más largo de filas/columnas claras (tolera un hueco)
+      let best = [0, -1], s = -1, last = -1;
+      for (let i = 0; i <= n; i++) {
+        const on = i < n && sum[i] >= need;
+        if (on) { if (s < 0) s = i; last = i; }
+        else if (s >= 0 && (i === n || i - last > 1)) { if (last - s > best[1] - best[0]) best = [s, last]; s = -1; }
+      }
+      return best;
+    };
+    const [c0, c1] = run(colSum, cols, rows * 0.3), [r0, r1] = run(rowSum, rows, cols * 0.25);
+    const bw = c1 - c0 + 1, bh = r1 - r0 + 1;
+    const ok = p90 > 105 && bw >= cols * 0.3 && bh >= rows * 0.22;
+    lockHits = ok ? Math.min(lockHits + 1, 5) : Math.max(lockHits - 1, 0);
+    if (ok) {
+      const k = innerWidth / W, pad = 6;
+      const target = { x: c0 * cell * k - pad, y: (top + r0 * cell) * k - pad, w: bw * cell * k + pad * 2, h: bh * cell * k + pad * 2 };
+      paper = paper ? { x: paper.x + (target.x - paper.x) * .5, y: paper.y + (target.y - paper.y) * .5, w: paper.w + (target.w - paper.w) * .5, h: paper.h + (target.h - paper.h) * .5 } : target;
+    }
+    if (lockHits === 0) paper = null;
+    const locked = lockHits >= 2 && paper;
+    placeBox(locked ? paper : defaultBox());
+    box.classList.toggle('locked', !!locked);
+    if (!site && !fields.num.value) hint(locked ? (steady ? 'Hoja encuadrada. Leyendo…' : 'Mantén el teléfono quieto') : 'Acerca la multa a la cámara');
   }
 
-  // ---------- Texto impreso: más lento, en segundo plano ----------
+  // ============ 6. Lectura del texto ============
+  let worker = null, ocrBusy = false;
+  const workerReady = (async () => {
+    for (let i = 0; i < 100 && !window.Tesseract; i++) await new Promise(r => setTimeout(r, 100));
+    if (!window.Tesseract) return null;
+    try {
+      const w = await Tesseract.createWorker('eng');
+      await w.setParameters({ tessedit_pageseg_mode: '6', preserve_interword_spaces: '1' });
+      return w;
+    } catch (e) { console.warn('Lector de texto no disponible', e); return null; }
+  })();
+
+  // En gris y con más contraste: el lector acierta más
+  function enhance(c, c2d) {
+    const im = c2d.getImageData(0, 0, c.width, c.height), d = im.data;
+    let lo = 255, hi = 0;
+    for (let i = 0; i < d.length; i += 16) { const v = 0.3 * d[i] + 0.59 * d[i + 1] + 0.11 * d[i + 2]; if (v < lo) lo = v; if (v > hi) hi = v; }
+    const k = 255 / Math.max(40, hi - lo);
+    for (let i = 0; i < d.length; i += 4) { const v = Math.max(0, Math.min(255, (0.3 * d[i] + 0.59 * d[i + 1] + 0.11 * d[i + 2] - lo) * k)); d[i] = d[i + 1] = d[i + 2] = v; }
+    c2d.putImageData(im, 0, 0);
+  }
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
   async function ocrLoop() {
-    if (ocrBusy || !window.Tesseract) return;
+    if (ocrBusy) return;
     ocrBusy = true;
     try {
-      if (!worker) worker = await Tesseract.createWorker('spa');
-      while (state === 'scanning' || state === 'collect') {
-        const c = grab(1500);
-        if (!c) { await new Promise(r => setTimeout(r, 300)); continue; }
-        const { data } = await worker.recognize(c);
-        if (state !== 'scanning' && state !== 'collect') break;
-        const text = data.text || '';
-        readInfo(text);
-        if (state === 'collect') { if (sure('num') && sure('plate')) finish(); continue; }
-        for (const u of findUrls(text)) {
-          const n = (seen.get(u.href) || 0) + 1;
-          seen.set(u.href, n);
-          if (n >= 3 && await exists(u)) { collect(u, 'de la dirección impresa'); break; }   // tres lecturas iguales y el sitio responde
-          if (n >= 3) seen.set(u.href, -99);                        // no existe: lectura errónea, descartar
+      worker = worker || await workerReady;
+      if (!worker) return;
+      let waited = 0;
+      while (state === 'scanning') {
+        if (sure('num') && sure('tag')) { await sleep(150); continue; }
+        if (!steady && waited < 900) { waited += 90; await sleep(90); continue; }
+        waited = 0;
+        // Primero el número de citación; después la placa
+        const kind = !sure('num') ? 'num' : 'tag', f = fields[kind];
+        if (f.zone && f.tries < 4) {
+          // Pasada fina: solo la franja donde está la etiqueta, a más resolución
+          f.tries++;
+          const z = f.zone, g = grab({ x: z.x - z.w * 0.06, y: z.y - z.h * 0.8, w: z.w * 1.12, h: z.h * 3.6 }, 1700, ocrCanvas, octx);
+          if (!g) { f.zone = null; continue; }
+          enhance(g.canvas, octx);
+          const { data } = await worker.recognize(g.canvas);
+          if (state !== 'scanning') break;
+          vote(kind, parse(kind, data.text || ''));
+        } else {
+          // Pasada general: toda la hoja, para leer y localizar las dos etiquetas
+          f.tries = 0;
+          const g = grab(paper && lockHits >= 2 ? paper : defaultBox(), 1500, ocrCanvas, octx);
+          if (!g) { await sleep(200); continue; }
+          enhance(g.canvas, octx);
+          const { data } = await worker.recognize(g.canvas);
+          if (state !== 'scanning') break;
+          const text = data.text || '', k = g.rect.w / g.canvas.width;
+          for (const kd of ['num', 'tag']) {
+            vote(kd, parse(kd, text));
+            const line = (data.lines || []).find(l => LABEL[kd].test(l.text));
+            fields[kd].zone = line ? { x: g.rect.x + line.bbox.x0 * k, y: g.rect.y + line.bbox.y0 * k, w: (line.bbox.x1 - line.bbox.x0) * k, h: (line.bbox.y1 - line.bbox.y0) * k } : null;
+          }
         }
-        if (state === 'collect') continue;
-        if (TICKET_RE.test(text)) {
-          lastText = text;
-          if (++textHits >= 4) return noUrl();
-        }
+        paint();
       }
-    } catch (e) {
-      console.warn('OCR no disponible', e);
-    } finally { ocrBusy = false; }
+    } catch (e) { console.warn('Lector de texto', e); }
+    finally { ocrBusy = false; }
   }
 
-  // Una dirección mal leída casi nunca existe: se comprueba antes de abrirla
+  // ============ 7. Progreso y final ============
+  function foundSite(u) {
+    site = u; siteAt = performance.now();
+    if (navigator.vibrate) { try { navigator.vibrate(40); } catch {} }
+    paint();
+  }
+  function paint() {
+    if (state !== 'scanning') return;
+    if (site) step('stSite', 'ok', site.hostname);
+    const n = fields.num, t = fields.tag;
+    step('stNum', sure('num') ? 'ok' : (site || n.value ? 'busy' : ''), n.value || (site ? 'Leyendo…' : '—'));
+    step('stTag', sure('tag') ? 'ok' : (sure('num') || t.value ? 'busy' : ''), t.value || (sure('num') ? 'Leyendo…' : '—'));
+    if (site && !sure('num')) hint('Sitio encontrado. Leyendo Citation No.…');
+    else if (site && !sure('tag')) hint('Leyendo Tag Number…');
+    else if (!site && sure('num')) hint('Ahora enfoca el código QR');
+  }
+  function check() {
+    const now = performance.now(), both = sure('num') && sure('tag');
+    if (both && !dataAt) dataAt = now;
+    if (site && both) return finish();
+    if (site && now - siteAt > 12000) return finish();         // sitio sí, datos no: no esperar más
+    if (!site && both && now - dataAt > 8000) return finish(); // datos sí, QR no
+  }
+
+  function fillWhy(list) {
+    const ul = $('vdWhy'); ul.textContent = '';
+    for (const t of list) { const li = document.createElement('li'); li.textContent = t; ul.append(li); }
+  }
+  function finish() {
+    if (state !== 'scanning') return;
+    state = 'result';
+    box.classList.add('done', 'locked');
+    $('scanView').hidden = true; $('resultView').hidden = false;
+    $('fNum').value = fields.num.value; $('fTag').value = fields.tag.value;
+    $('foot').textContent = FOOT;
+    const missing = !fields.num.value || !fields.tag.value;
+    $('rTitle').textContent = missing ? 'Revisa los datos' : 'Multa leída';
+    hint(missing ? 'No pude leer todo: complétalo a mano' : 'Listo');
+    const go = $('go'), v = $('verdict');
+    go.dataset.confirm = '';
+    if (!site) {
+      v.className = 'warn';
+      $('vdTitle').textContent = 'No encontré el código QR'; $('vdHost').textContent = '';
+      fillWhy(['Busca el sitio por el nombre de la ciudad o corte que aparece en la multa.', 'Entra solo en sitios .gov o en el que nombra la propia multa.']);
+      go.textContent = 'Buscar sitio oficial'; go.className = 'btn primary';
+      go.href = 'https://duckduckgo.com/?q=' + encodeURIComponent('pay citation online official site');
+      return;
+    }
+    const j = judge(site), target = site;
+    v.className = j.level;
+    $('vdTitle').textContent = j.title; $('vdHost').textContent = j.host; fillWhy(j.why);
+    go.href = site.href;
+    go.textContent = j.level === 'bad' ? 'Abrir de todos modos' : 'Abrir sitio de pago';
+    go.className = 'btn primary' + (j.level === 'bad' ? ' danger' : '');
+    if (j.level === 'bad') go.dataset.confirm = '1';
+    // Un sitio que no existe casi siempre es un QR falso o dañado
+    if (j.level !== 'bad') exists(site).then(ok => {
+      if (ok || state !== 'result' || site !== target) return;
+      v.className = 'bad'; $('vdTitle').textContent = 'El sitio no responde';
+      fillWhy(['La dirección del QR no existe o está caída. No introduzcas datos de pago.']);
+      go.textContent = 'Abrir de todos modos'; go.className = 'btn primary danger'; go.dataset.confirm = '1';
+    });
+  }
   async function exists(url) {
-    const ac = new AbortController(), t = setTimeout(() => ac.abort(), 5000);
+    const ac = new AbortController(), t = setTimeout(() => ac.abort(), 6000);
     try { await fetch(url.origin + '/', { mode: 'no-cors', signal: ac.signal }); return true; }
-    catch { return false; }
+    catch (e) { return e.name === 'AbortError'; }
     finally { clearTimeout(t); }
   }
 
-  // ---------- Resultado ----------
-  function found(url, how) {
-    if (state !== 'scanning') return;
-    state = 'found';
-    frame.className = 'found';
-    const official = isOfficial(url.hostname);
-    const d = $('domain');
-    d.textContent = url.hostname;
-    d.className = official ? 'ok' : 'warn';
-    $('go').href = url.href;
-    $('barfill').style.width = '0';
-    const origin = (official ? 'Sitio oficial de gobierno' : 'No es un dominio .gov/.gob: comprueba que sea el de tu ciudad antes de pagar')
-        + ' · leído ' + how + '.';
-
-    if (info.num || info.plate) {
-      // Hay datos que pegar: se abre en otra pestaña para poder volver aquí a copiar el segundo
-      $('fnum').value = info.num; $('fplate').value = info.plate;
-      $('go').textContent = info.num ? 'Copiar multa y abrir pago' : 'Abrir sitio de pago';
-      $('go').target = '_blank';
-      show(['result', 'fields', 'go', 'again']);
-      showInfo();
-      say('Multa leída. Revisa los datos y abre el pago',
-          'El botón copia el número de multa: pégalo en el sitio. Para la placa, vuelve a esta pestaña y pulsa «Copiar». ' + origin);
+  async function copy(input, btn) {
+    const v = input.value.trim();
+    if (!v) { input.focus(); return; }
+    try { await navigator.clipboard.writeText(v); btn.textContent = 'Copiado'; btn.classList.add('done'); }
+    catch { input.select(); btn.textContent = 'Selecciona'; }
+    setTimeout(() => { btn.textContent = 'Copiar'; btn.classList.remove('done'); }, 2200);
+  }
+  $('cNum').onclick = () => copy($('fNum'), $('cNum'));
+  $('cTag').onclick = () => copy($('fTag'), $('cTag'));
+  $('go').addEventListener('click', e => {
+    const go = $('go');
+    if (go.dataset.confirm === '1') {           // sitio sospechoso: pide un segundo toque
+      e.preventDefault(); go.dataset.confirm = '2'; go.textContent = 'Toca otra vez para abrir';
       return;
     }
-
-    show(['result', 'go', 'cancel']);
-    say('No pude leer el número ni la placa. Abriendo el sitio de pago…', origin);
-    const t0 = performance.now(), fill = $('barfill');
-    (function tick() {
-      if (state !== 'found') return;
-      const p = Math.min(1, (performance.now() - t0) / COUNTDOWN_MS);
-      fill.style.width = (p * 100) + '%';
-      if (p < 1) timer = requestAnimationFrame(tick);
-      else location.href = url.href;
-    })();
-  }
-
-  async function copyText(text, btn, label) {
-    if (!text) return;
-    try { await navigator.clipboard.writeText(text); btn.textContent = 'Copiado ✓'; }
-    catch { btn.textContent = 'Copia a mano'; }
-    setTimeout(() => { btn.textContent = label; }, 2500);
-  }
-  $('go').addEventListener('click', () => {
-    if ($('go').target !== '_blank') return;
-    const n = $('fnum').value.trim();
-    if (n) navigator.clipboard?.writeText(n).catch(() => {});
-    say(n ? 'Número de multa copiado' : 'Sitio de pago abierto',
-        'Pégalo en el sitio de pago. Para la placa, vuelve a esta pestaña, pulsa «Copiar» junto a la placa y pégala.');
+    const n = $('fNum').value.trim();
+    if (n) {
+      navigator.clipboard?.writeText(n).catch(() => {});
+      $('foot').textContent = 'Citation No. copiado: pégalo en el sitio. Luego vuelve aquí y pulsa «Copiar» en Tag Number.';
+    }
+    if (site && go.href === site.href) remember(site.hostname);
   });
 
-  function noUrl() {
-    state = 'stopped';
-    frame.className = 'found';
-    const lines = lastText.split('\n').map(s => s.trim()).filter(s => /[a-záéíóúñ]{4,}/i.test(s));
-    const agency = (lines.find(s => /ciudad|city|municip|ayuntamiento|county|condado|estado|state|polic|tr[aá]nsito|parking|autoridad|department|departamento/i.test(s)) || lines[0] || '').slice(0, 60);
-    $('search').href = 'https://duckduckgo.com/?q=' + encodeURIComponent('pagar multa en línea sitio oficial ' + agency);
-    $('fnum').value = info.num; $('fplate').value = info.plate;
-    show(info.num || info.plate ? ['fields', 'search', 'again'] : ['search', 'again']);
-    showInfo();
-    say('Leí la multa, pero no trae dirección web ni código QR',
-        agency ? 'Emisor detectado: ' + agency + '. Busca el sitio oficial y entra solo si es el de tu ciudad.' : 'Busca el sitio oficial de la entidad que la emitió.');
-  }
-
-  $('cancel').onclick = () => {
-    cancelAnimationFrame(timer);
-    state = 'stopped';
-    $('barfill').style.width = '0';
-    show(['result', 'go', 'again']);
-    say('Apertura cancelada', 'Puedes abrir el sitio con el botón o escanear otra multa.');
-  };
-  $('again').onclick = beginScan;
-  $('start').onclick = async () => {
-    if ($('start').dataset.play && stream) {
-      delete $('start').dataset.play;
-      try { await video.play(); setupTorch(); beginScan(); return; } catch {}
-    }
-    startCamera();
-  };
-  $('copy').onclick = () => copyText($('fnum').value.trim(), $('copy'), 'Copiar');
-  $('copyPlate').onclick = () => copyText($('fplate').value.trim(), $('copyPlate'), 'Copiar');
-
-  // Al volver desde el sitio de pago, seguir escaneando
-  window.addEventListener('pageshow', e => { if (e.persisted && stream) beginScan(); });
-
-  window.__test = { findUrls, isOfficial };
+  addEventListener('resize', () => { if (state === 'scanning' && !paper) placeBox(defaultBox()); });
+  window.__test = { judge, parse, fields };
+  placeBox(defaultBox(), false);
   startCamera();
-})();
+});
 </script>
 </body>
 </html>
