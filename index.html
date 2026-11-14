@@ -294,7 +294,11 @@
         const img = ctx.getImageData(0, 0, c.width, c.height);
         const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
         if (code && code.data) {
-          const u = findUrls(code.data)[0] || (/^https?:/i.test(code.data) ? toUrl(code.data) : null);
+          // Un QR que ya es una dirección se abre tal cual, sin recortar ni corregir nada
+          const raw = code.data.trim();
+          let u = null;
+          if (/^https?:\/\/\S+$/i.test(raw)) { try { u = new URL(raw); } catch {} }
+          if (!u) u = findUrls(raw)[0] || null;
           if (u) { readInfo(code.data); return found(u, 'del código QR'); }
         }
       }
