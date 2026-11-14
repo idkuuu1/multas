@@ -177,7 +177,7 @@
 
   // ---------- Datos de la multa ----------
   const NUM_RE = /(?:folio|boleta|boleto|citaci[oó]n|citation|ticket|notice|summons|infracci[oó]n|violation|multa)\s*(?:no|n[uú]m(?:ero)?|number|#|n[°º])?\.?\s*[:#]?\s*([A-Z0-9][A-Z0-9-]{5,17})\b/i;
-  const PLATE_RE = /(?:placas?|plate|tag|tablilla|matr[ií]cula|patente|lic(?:ense)?\.?\s*(?:plate|no)?)\s*(?:no|n[uú]m(?:ero)?|number|#)?\.?\s*[:#]?\s*([A-Z0-9][A-Z0-9 -]{3,9}[A-Z0-9])\b/i;
+  const PLATE_RE = /\b(?:vehicle\s*tag|veh\.?\s*tag|tag|placas?|plate|tablilla|matr[ií]cula|patente|lic(?:ense)?\.?\s*(?:plate|no)?)\b\s*(?:no|n[uú]m(?:ero)?|number|#)?\.?\s*[:#]?\s*([A-Z0-9][A-Z0-9 -]{3,9}[A-Z0-9])\b/i;
   const info = { num: '', plate: '' };
   const votes = { num: new Map(), plate: new Map() };
   function vote(kind, v) {
