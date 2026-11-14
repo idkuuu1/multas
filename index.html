@@ -285,6 +285,55 @@ window.addEventListener('DOMContentLoaded', () => {
     issuer.votes.set(key, e);
     issuer.value = [...issuer.votes.values()].sort((a, b) => b.n - a.n)[0].r;
   }
+  // ============ 1c. Maryland: sitios oficiales verificados ============
+  // Cada dirección se sacó del sitio oficial (.gov) del propio organismo. «domains» son los que el QR puede usar sin sospecha.
+  const MD_DIRECTORY = [
+    { id: 'md-court', name: 'District Court of Maryland', url: 'https://www.mdcourts.gov/traffic',
+      domains: ['mdcourts.gov', 'courts.state.md.us', 'payments.lexisnexis.com/md/'],
+      note: 'Las multas de tráfico de Maryland (Uniform Complaint and Citation) se pagan al tribunal, aunque las ponga la policía del condado o la estatal.',
+      test: t => /UNIFORM\s+COMPLAINT|DISTRICT\s+COURT\s+OF\s+MARYLAND|MARYLAND\s+STATE\s+POLICE|TRAFFIC\s+PROCESSING\s+CENTER|MDCOURTS/.test(t) ||
+                 (/MARYLAND|\bMD\b/.test(t) && /\b(POLICE|SHERIFF|TROOPER)\b/.test(t) && !/PARKING/.test(t)) },
+    { id: 'balt-city', name: 'Baltimore City', url: 'https://pay.baltimorecity.gov/parkingfines', domains: ['baltimorecity.gov'],
+      test: t => /BALTIMORE\s+CITY|CITY\s+OF\s+BALTIMORE|MAYOR\s+AND\s+CITY\s+COUNCIL\s+OF\s+BALTIMORE/.test(t) },
+    { id: 'balt-county', name: 'Baltimore County', url: 'https://www.baltimorecountymd.gov/Agencies/budfin/citations', domains: ['baltimorecountymd.gov'],
+      test: t => /BALTIMORE\s+COUNTY/.test(t) },
+    { id: 'montgomery', name: 'Montgomery County', url: 'https://www.montgomerycountymd.gov/DOT-Parking/faq/pay-ticket.html', domains: ['montgomerycountymd.gov'],
+      test: t => /MONTGOMERY\s+COUNTY/.test(t) },
+    { id: 'pg', name: "Prince George's County", url: 'https://www.princegeorgescountymd.gov/departments-offices/revenue-authority/parking-violations', domains: ['princegeorgescountymd.gov'],
+      test: t => /PRINCE\s+GEORGE/.test(t) },
+    { id: 'rockville', name: 'City of Rockville', url: 'https://www.rockvillemd.gov/2306/Parking-Tickets', domains: ['rockvillemd.gov', 'rockville.citationportal.com'],
+      test: t => /ROCKVILLE/.test(t) },
+    { id: 'takoma', name: 'City of Takoma Park', url: 'https://takomaparkmd.gov/?p=810', domains: ['takomaparkmd.gov'],
+      test: t => /TAKOMA\s+PARK/.test(t) },
+    { id: 'umd', name: 'University of Maryland', url: 'https://transportation.umd.edu/', domains: ['umd.edu'],
+      test: t => /UNIVERSITY\s+OF\s+MARYLAND|\bUMD\b|TRANSPORTATION\s+SERVICES.*COLLEGE\s+PARK/.test(t) },
+    { id: 'ocean-city', name: 'Town of Ocean City', url: 'https://oceancitymd.gov/oc/', domains: ['oceancitymd.gov'],
+      test: t => /OCEAN\s+CITY/.test(t) }
+  ];
+  const directory = { votes: new Map(), value: null };
+  function matchDirectory(text) {
+    const t = text.toUpperCase().replace(/\s+/g, ' ');
+    const parking = /PARKING/.test(t);
+    // Una multa de estacionamiento se paga a la ciudad o condado; una de tráfico, al tribunal
+    const order = parking ? MD_DIRECTORY.slice(1).concat(MD_DIRECTORY[0]) : MD_DIRECTORY;
+    return order.find(e => e.test(t)) || null;
+  }
+  function voteDirectory(text) {
+    const e = matchDirectory(text);
+    if (!e) return;
+    directory.votes.set(e.id, (directory.votes.get(e.id) || 0) + 1);
+    const best = [...directory.votes].sort((a, b) => b[1] - a[1])[0][0];
+    directory.value = MD_DIRECTORY.find(x => x.id === best);
+  }
+  function inDirectory(url, e) {
+    if (!e) return false;
+    const h = url.hostname.toLowerCase().replace(/^www\./, ''), path = url.pathname.toLowerCase();
+    return e.domains.some(d => {
+      const [host, ...rest] = d.split('/'), pre = rest.length ? '/' + rest.join('/') : '';
+      return (h === host || h.endsWith('.' + host)) && path.startsWith(pre);
+    });
+  }
+
   // El sitio oficial se busca por el emisor, no por el QR: un QR falso no puede cambiar a dónde lleva
   function officialSearch(iss, lucky) {
     const scope = iss.edu ? 'site:.edu' : 'site:.gov';
@@ -403,7 +452,7 @@ window.addEventListener('DOMContentLoaded', () => {
     state = 'scanning'; site = null; siteAt = dataAt = 0;
     paper = null; lockHits = 0; steady = false; prevGrid = null;
     for (const f of Object.values(fields)) { f.votes.clear(); f.value = ''; f.zone = null; f.tries = 0; }
-    issuer.votes.clear(); issuer.value = null;
+    issuer.votes.clear(); issuer.value = null; directory.votes.clear(); directory.value = null;
     $('resultView').hidden = true; $('scanView').hidden = false;
     try { sheet.classList.toggle('mini', !!localStorage.getItem('multas.mini')); } catch {}
     step('stSite', 'busy', 'Buscando el código QR…'); step('stNum', '', '—'); step('stTag', '', '—');
@@ -561,7 +610,7 @@ window.addEventListener('DOMContentLoaded', () => {
           const { data } = await worker.recognize(g.canvas);
           if (state !== 'scanning') break;
           const text = data.text || '', k = g.rect.w / g.canvas.width;
-          voteIssuer(text);
+          voteIssuer(text); voteDirectory(text);
           for (const kd of ['num', 'tag']) {
             vote(kd, parse(kd, text));
             const line = (data.lines || []).find(l => LABEL[kd].test(l.text));
@@ -595,7 +644,7 @@ window.addEventListener('DOMContentLoaded', () => {
     if (both && !dataAt) dataAt = now;
     if (site && both) return finish();
     if (site && now - siteAt > 12000) return finish();         // sitio sí, datos no: no esperar más
-    if (!site && both && issuer.value && now - dataAt > 3000) return finish(); // emisor y datos: el QR ya no hace falta
+    if (!site && both && (issuer.value || directory.value) && now - dataAt > 3000) return finish(); // emisor y datos: el QR ya no hace falta
     if (!site && both && now - dataAt > 8000) return finish(); // datos sí, QR no
   }
 
@@ -625,6 +674,29 @@ window.addEventListener('DOMContentLoaded', () => {
     }
     go.hidden = !site;
     if (site) go.href = site.href; else go.removeAttribute('href');
+
+    const dir = directory.value;
+    if (dir) {
+      $('issuer').hidden = false; $('issuer').textContent = 'Pagar a '; const b = document.createElement('b'); b.textContent = dir.name + ', MD'; $('issuer').append(b);
+      off.hidden = false; others.hidden = true; off.href = dir.url; off.textContent = 'Pagar en el sitio oficial: ' + dir.name; off.className = 'btn primary';
+      const host = new URL(dir.url).hostname;
+      if (site && judge(site).level === 'bad') {
+        v.className = 'bad'; $('vdTitle').textContent = 'El QR es sospechoso: no lo uses'; $('vdHost').textContent = site.hostname;
+        fillWhy([...judge(site).why, 'Usa el botón azul: lleva al sitio oficial verificado de ' + dir.name + '.']);
+        go.textContent = 'Abrir enlace del QR de todos modos'; go.className = 'btn danger'; go.dataset.confirm = '1';
+      } else if (site && inDirectory(site, dir)) {
+        v.className = 'safe'; $('vdTitle').textContent = 'El QR lleva al sitio oficial de ' + dir.name; $('vdHost').textContent = site.hostname;
+        fillWhy(['Es uno de los dominios oficiales verificados de ' + dir.name + '.'].concat(dir.note ? [dir.note] : []));
+        go.textContent = 'Abrir sitio de pago oficial (QR)'; go.className = 'btn primary'; go.style.order = '-1';
+        off.className = 'btn';
+      } else {
+        v.className = 'safe'; $('vdTitle').textContent = 'Sitio oficial verificado'; $('vdHost').textContent = host;
+        fillWhy([(dir.note || 'Esta multa la emite ' + dir.name + '.'),
+                 'El botón azul va directo a su página oficial de pago. Si la multa fuera falsa, el número no aparecerá allí.']
+                 .concat(site ? ['El QR de la hoja lleva a ' + site.hostname + ', que no es un dominio de ' + dir.name + '. Mejor no lo uses.'] : []));
+      }
+      return;
+    }
     go.className = 'btn'; go.style.order = '';
 
     if (!site) {
@@ -728,7 +800,7 @@ window.addEventListener('DOMContentLoaded', () => {
   try { if (localStorage.getItem('multas.mini')) sheet.classList.add('mini'); } catch {}
 
   addEventListener('resize', () => { if (state === 'scanning' && !paper) placeBox(defaultBox()); });
-  window.__test = { judge, parse, fields, parseIssuer, officialSearch, matchesIssuer, issuer };
+  window.__test = { judge, parse, fields, parseIssuer, officialSearch, matchesIssuer, issuer, matchDirectory, inDirectory, directory };
   placeBox(defaultBox(), false);
   startCamera();
 });
