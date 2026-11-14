@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0d1512">
+<title>Escáner de multas</title>
+<style>
+  /* Layout: cámara a pantalla completa, marco guía al centro, panel de estado abajo */
+  :root {
+    --bg: #0d1512;
+    --panel: #14201b;
+    --fg: #eef5f0;
+    --muted: #9db3a8;
+    --line: #2b3d35;
+    --ok: #3ddc84;
+    --warn: #ffc247;
+    --bad: #ff6b5e;
+    --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.4 var(--font); }
+  [hidden] { display: none !important; }
+
+  #stage { position: fixed; inset: 0; overflow: hidden; background: #000; }
+  #video { width: 100%; height: 100%; object-fit: cover; }
+
+  #frame {
+    position: absolute; left: 50%; top: 42%;
+    width: min(84vw, 520px); aspect-ratio: 3 / 4; max-height: 62vh;
+    transform: translate(-50%, -50%);
+    border-radius: 14px;
+    box-shadow: 0 0 0 200vmax rgba(5, 10, 8, .55);
+    pointer-events: none;
+  }
+  #frame i { position: absolute; width: 34px; height: 34px; border: 4px solid var(--fg); transition: border-color .2s; }
+  #frame i:nth-child(1) { left: -2px; top: -2px; border-right: 0; border-bottom: 0; border-top-left-radius: 14px; }
+  #frame i:nth-child(2) { right: -2px; top: -2px; border-left: 0; border-bottom: 0; border-top-right-radius: 14px; }
+  #frame i:nth-child(3) { left: -2px; bottom: -2px; border-right: 0; border-top: 0; border-bottom-left-radius: 14px; }
+  #frame i:nth-child(4) { right: -2px; bottom: -2px; border-left: 0; border-top: 0; border-bottom-right-radius: 14px; }
+  #frame.reading i { border-color: var(--warn); }
+  #frame.found i { border-color: var(--ok); }
+  #scanline {
+    position: absolute; left: 6%; right: 6%; top: 0; height: 2px; background: var(--ok); opacity: .8;
+    animation: sweep 2.4s ease-in-out infinite alternate;
+  }
+  #frame.found #scanline { display: none; }
+  @keyframes sweep { to { top: 100%; } }
+  @media (prefers-reduced-motion: reduce) { #scanline { animation: none; top: 50%; } }
+
+  #torch {
+    position: absolute; right: max(16px, env(safe-area-inset-right, 0px)); top: calc(16px + env(safe-area-inset-top, 0px));
+    flex: none; width: 56px; height: 56px; min-height: 0; padding: 0; border-radius: 50%;
+    background: rgba(13, 21, 18, .75); border: 1px solid var(--line); color: var(--fg);
+  }
+  #torch svg { width: 26px; height: 26px; }
+  #torch[aria-pressed="true"] { background: var(--warn); border-color: var(--warn); color: #2a1c00; }
+  #data { margin: 0; font-size: .95rem; }
+  #data b { font-variant-numeric: tabular-nums; letter-spacing: .02em; }
+
+  #panel {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    padding: 16px max(16px, env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+    background: var(--panel); border-top: 1px solid var(--line);
+    border-radius: 18px 18px 0 0;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  #status { margin: 0; font-size: 1.05rem; font-weight: 600; text-wrap: balance; }
+  #detail { margin: 0; color: var(--muted); font-size: .9rem; overflow-wrap: anywhere; }
+  #domain { font-size: 1.25rem; font-weight: 700; overflow-wrap: anywhere; }
+  #domain.ok { color: var(--ok); }
+  #domain.warn { color: var(--warn); }
+  #bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  #bar b { display: block; height: 100%; width: 0; background: var(--ok); }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  button, a.btn {
+    flex: 1 1 140px; min-height: 48px; padding: 0 16px;
+    border-radius: 12px; border: 1px solid var(--line);
+    background: transparent; color: var(--fg); font: 600 1rem var(--font);
+    display: inline-flex; align-items: center; justify-content: center; text-decoration: none;
+  }
+  button.primary, a.btn.primary { background: var(--ok); border-color: var(--ok); color: #062313; }
+  button:focus-visible, a.btn:focus-visible { outline: 3px solid var(--warn); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="video" playsinline muted autoplay></video>
+  <div id="frame"><i></i><i></i><i></i><i></i><div id="scanline"></div></div>
+
+  <button id="torch" hidden aria-pressed="false" aria-label="Flash">
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></svg>
+  </button>
+
+  <div id="panel" aria-live="polite">
+    <p id="status">Abriendo la cámara…</p>
+    <p id="detail">Permite el uso de la cámara cuando el navegador lo pida.</p>
+
+    <div id="result" hidden>
+      <div id="domain"></div>
+      <div id="bar"><b id="barfill"></b></div>
+    </div>
+
+    <p id="data" hidden></p>
+
+    <div class="row">
+      <button id="start" class="primary" hidden>Activar cámara</button>
+      <button id="copy" hidden>Copiar número</button>
+      <a id="go" class="btn primary" hidden rel="noopener">Abrir ahora</a>
+      <a id="search" class="btn primary" hidden rel="noopener">Buscar dónde pagar</a>
+      <button id="cancel" hidden>Cancelar</button>
+      <button id="again" hidden>Escanear otra</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.0/dist/tesseract.min.js"></script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const video = $('video'), frame = $('frame');
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+  const COUNTDOWN_MS = 3000;
+  let state = 'idle';            // idle | scanning | found | stopped
+  let worker = null, ocrBusy = false, timer = null;
+  const seen = new Map();        // url -> veces leída por OCR
+  let textHits = 0, lastText = '';
+
+  // ---------- Reconocer direcciones web ----------
+  const TLD = 'gov|gob|com|org|net|us|mx|es|pr|do|co|ar|cl|pe|ec|uy|py|bo|ve|gt|sv|hn|ni|cr|pa|cu|br|ca|uk|eu|info|app|io';
+  const URL_RE = new RegExp(
+    '(?:https?:\\/\\/)?(?:[a-z0-9-]+\\.)+(?:' + TLD + ')(?:\\.[a-z]{2})?(?:\\/[\\w\\-.~%/?=&#+]*)?', 'gi');
+  const PAY_RE = /pag|pay|multa|ticket|citation|citacion|infrac|violation|fine|parking|transit|estacion/i;
+  const TICKET_RE = /multa|infracci|boleta|citaci|citation|violation|parking|estacionamiento|tr[aá]nsito|notice|fine|placa|plate/i;
+
+  function toUrl(raw) {
+    let s = raw.trim().replace(/[.,;:)\]]+$/, '');
+    if (!/^https?:\/\//i.test(s)) s = 'https://' + s;
+    try {
+      const u = new URL(s);
+      if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
+      if (!u.hostname.includes('.')) return null;
+      if (u.protocol === 'http:') u.protocol = 'https:';
+      u.hostname = u.hostname.replace(/^[wv]{2,6}\./i, 'www.');
+      return u;
+    } catch { return null; }
+  }
+  function findUrls(text) {
+    const out = [];
+    for (const m of text.replace(/\s*([./])\s*/g, '$1').matchAll(URL_RE)) {
+      if (/@$/.test(text.slice(0, m.index))) continue;          // correo, no web
+      const u = toUrl(m[0]);
+      if (u) out.push(u);
+    }
+    // primero las que parecen de pago
+    return out.sort((a, b) => PAY_RE.test(b.href) - PAY_RE.test(a.href));
+  }
+  const isOfficial = host => /\.(gov|gob)(\.[a-z]{2})?$/i.test(host) || /\.(gov|gob)\./i.test(host);
+
+  // ---------- Datos de la multa ----------
+  const NUM_RE = /(?:folio|boleta|boleto|citaci[oó]n|citation|ticket|notice|summons|infracci[oó]n|violation|multa)\s*(?:no|n[uú]m(?:ero)?|number|#|n[°º])?\.?\s*[:#]?\s*([A-Z0-9][A-Z0-9-]{5,17})\b/i;
+  const PLATE_RE = /(?:placas?|plate|tablilla|matr[ií]cula|patente|lic(?:ense)?\.?\s*(?:plate|no)?)\s*(?:no|n[uú]m(?:ero)?|number|#)?\.?\s*[:#]?\s*([A-Z0-9][A-Z0-9 -]{3,9}[A-Z0-9])\b/i;
+  const info = { num: '', plate: '' };
+  function readInfo(text) {
+    const n = text.match(NUM_RE), p = text.match(PLATE_RE);
+    if (n && /\d/.test(n[1])) info.num = n[1].toUpperCase();
+    if (p && /\d/.test(p[1])) info.plate = p[1].toUpperCase().trim();
+    showInfo();
+  }
+  function showInfo() {
+    const el = $('data');
+    el.textContent = '';
+    for (const [label, v] of [['Multa nº ', info.num], ['Placa ', info.plate]]) {
+      if (!v) continue;
+      if (el.childNodes.length) el.append('  ·  ');
+      el.append(label); const b = document.createElement('b'); b.textContent = v; el.append(b);
+    }
+    el.hidden = !el.childNodes.length;
+  }
+  // ---------- Interfaz ----------
+  function say(status, detail = '') { $('status').textContent = status; $('detail').textContent = detail; }
+  function show(ids) {
+    for (const id of ['start', 'go', 'search', 'cancel', 'again', 'result', 'copy']) $(id).hidden = !ids.includes(id);
+  }
+
+  // ---------- Cámara ----------
+  let stream = null, starting = false;
+  function stopCamera() {
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = null; video.srcObject = null; $('torch').hidden = true;
+  }
+  async function startCamera() {
+    if (starting) return;
+    starting = true;
+    show([]);
+    try {
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        say('La cámara solo funciona desde una dirección https',
+            'Abre la página publicada (https://…) en Safari o Chrome. Desde un archivo o una vista previa el navegador la bloquea.');
+        show(['start']);
+        return;
+      }
+      say('Abriendo la cámara…', 'Pulsa «Permitir» cuando el navegador lo pida.');
+      stopCamera();
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+        });
+      } catch (e) {
+        if (e.name === 'OverconstrainedError' || e.name === 'NotFoundError') {
+          try { stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: true }); } catch (e2) { e = e2; }
+        }
+        if (!stream) {
+          const why = {
+            NotAllowedError: 'El permiso de cámara está denegado. En iPhone: toca «aA» o el icono junto a la dirección → Ajustes del sitio web → Cámara → Permitir, y pulsa el botón.',
+            NotFoundError: 'No se encontró ninguna cámara en este dispositivo.',
+            NotReadableError: 'Otra app está usando la cámara. Ciérrala y pulsa el botón.'
+          }[e.name] || 'Pulsa el botón para intentarlo de nuevo. (' + e.name + ')';
+          say('No se pudo abrir la cámara', why);
+          show(['start']);
+          return;
+        }
+      }
+      video.srcObject = stream;
+      try { await video.play(); }
+      catch { say('Cámara lista', 'Pulsa el botón para empezar.'); show(['start']); $('start').dataset.play = '1'; return; }
+      setupTorch();
+      beginScan();
+    } finally { starting = false; }
+  }
+
+  // ---------- Flash ----------
+  let torchOn = false;
+  function setupTorch() {
+    torchOn = false;
+    $('torch').setAttribute('aria-pressed', 'false');
+    $('torch').hidden = false;
+  }
+  $('torch').onclick = async () => {
+    const track = stream && stream.getVideoTracks()[0];
+    if (!track) return;
+    try {
+      await track.applyConstraints({ advanced: [{ torch: !torchOn }] });
+      const on = track.getSettings ? track.getSettings().torch : undefined;
+      if (on === undefined && !(track.getCapabilities && track.getCapabilities().torch)) throw new Error('sin flash');
+      torchOn = on === undefined ? !torchOn : on;
+      $('torch').setAttribute('aria-pressed', String(torchOn));
+    } catch {
+      $('torch').hidden = true;
+      if (state === 'scanning') say('Apunta a la multa', 'Este navegador o esta cámara no permite encender el flash desde una página web.');
+    }
+  };
+
+  function beginScan() {
+    state = 'scanning'; seen.clear(); textHits = 0; lastText = ''; info.num = info.plate = ''; showInfo();
+    frame.className = '';
+    show([]);
+    say('Apunta a la multa', 'Encuadra la hoja dentro del marco. No hace falta tocar nada.');
+    requestAnimationFrame(qrLoop);
+    ocrLoop();
+  }
+
+  // Recorta lo que cae dentro del marco guía
+  function grab(maxSide, whole) {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) return null;
+    const vr = video.getBoundingClientRect(), fr = whole ? vr : frame.getBoundingClientRect();
+    const scale = Math.max(vr.width / vw, vr.height / vh);           // object-fit: cover
+    const offX = (vw * scale - vr.width) / 2, offY = (vh * scale - vr.height) / 2;
+    let sx = (fr.left - vr.left + offX) / scale, sy = (fr.top - vr.top + offY) / scale;
+    let sw = fr.width / scale, sh = fr.height / scale;
+    if (!whole) { const m = 0.15; sx -= sw * m; sy -= sh * m; sw *= 1 + 2 * m; sh *= 1 + 2 * m; }   // margen por si la hoja no está bien centrada
+    sx = Math.max(0, sx); sy = Math.max(0, sy);
+    sw = Math.min(vw - sx, sw); sh = Math.min(vh - sy, sh);
+    const k = Math.min(1, maxSide / Math.max(sw, sh));
+    canvas.width = Math.round(sw * k); canvas.height = Math.round(sh * k);
+    ctx.drawImage(video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+    return canvas;
+  }
+
+  // ---------- Código QR: rápido, en cada pasada ----------
+  let lastQr = 0;
+  function qrLoop(t) {
+    if (state !== 'scanning') return;
+    if (t - lastQr > 180 && window.jsQR) {
+      lastQr = t;
+      const c = grab(1000, true);
+      if (c) {
+        const img = ctx.getImageData(0, 0, c.width, c.height);
+        const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+        if (code && code.data) {
+          const u = findUrls(code.data)[0] || (/^https?:/i.test(code.data) ? toUrl(code.data) : null);
+          if (u) { readInfo(code.data); return found(u, 'del código QR'); }
+        }
+      }
+    }
+    requestAnimationFrame(qrLoop);
+  }
+
+  // ---------- Texto impreso: más lento, en segundo plano ----------
+  async function ocrLoop() {
+    if (ocrBusy || !window.Tesseract) return;
+    ocrBusy = true;
+    try {
+      if (!worker) worker = await Tesseract.createWorker('spa');
+      while (state === 'scanning') {
+        const c = grab(1500);
+        if (!c) { await new Promise(r => setTimeout(r, 300)); continue; }
+        const { data } = await worker.recognize(c);
+        if (state !== 'scanning') break;
+        const text = data.text || '';
+        if (text.replace(/\s/g, '').length > 25) frame.className = 'reading';
+        readInfo(text);
+        for (const u of findUrls(text)) {
+          const n = (seen.get(u.href) || 0) + 1;
+          seen.set(u.href, n);
+          if (n >= 3 && await exists(u)) return found(u, 'de la dirección impresa');   // tres lecturas iguales y el sitio responde
+          if (n >= 3) seen.set(u.href, -99);                        // no existe: lectura errónea, descartar
+        }
+        if (TICKET_RE.test(text)) {
+          lastText = text;
+          if (++textHits >= 4) return noUrl();
+        }
+      }
+    } catch (e) {
+      console.warn('OCR no disponible', e);
+    } finally { ocrBusy = false; }
+  }
+
+  // Una dirección mal leída casi nunca existe: se comprueba antes de abrirla
+  async function exists(url) {
+    const ac = new AbortController(), t = setTimeout(() => ac.abort(), 5000);
+    try { await fetch(url.origin + '/', { mode: 'no-cors', signal: ac.signal }); return true; }
+    catch { return false; }
+    finally { clearTimeout(t); }
+  }
+
+  // ---------- Resultado ----------
+  function found(url, how) {
+    if (state !== 'scanning') return;
+    state = 'found';
+    frame.className = 'found';
+    if (navigator.vibrate) navigator.vibrate(60);
+    const official = isOfficial(url.hostname);
+    const d = $('domain');
+    d.textContent = url.hostname;
+    d.className = official ? 'ok' : 'warn';
+    $('go').href = url.href;
+    show(info.num ? ['result', 'go', 'cancel', 'copy'] : ['result', 'go', 'cancel']);
+    if (info.num) navigator.clipboard?.writeText(info.num).catch(() => {});
+    say('Multa leída. Abriendo el sitio de pago…',
+        (official ? 'Sitio oficial de gobierno' : 'No es un dominio .gov/.gob: comprueba que sea el de tu ciudad antes de pagar')
+        + ' · leído ' + how + '.');
+    const t0 = performance.now(), fill = $('barfill');
+    (function tick() {
+      if (state !== 'found') return;
+      const p = Math.min(1, (performance.now() - t0) / COUNTDOWN_MS);
+      fill.style.width = (p * 100) + '%';
+      if (p < 1) timer = requestAnimationFrame(tick);
+      else location.href = url.href;
+    })();
+  }
+
+  function noUrl() {
+    state = 'stopped';
+    frame.className = 'found';
+    const lines = lastText.split('\n').map(s => s.trim()).filter(s => /[a-záéíóúñ]{4,}/i.test(s));
+    const agency = (lines.find(s => /ciudad|city|municip|ayuntamiento|county|condado|estado|state|polic|tr[aá]nsito|parking|autoridad|department|departamento/i.test(s)) || lines[0] || '').slice(0, 60);
+    $('search').href = 'https://duckduckgo.com/?q=' + encodeURIComponent('pagar multa en línea sitio oficial ' + agency);
+    show(info.num ? ['search', 'again', 'copy'] : ['search', 'again']);
+    say('Leí la multa, pero no trae dirección web ni código QR',
+        agency ? 'Emisor detectado: ' + agency + '. Busca el sitio oficial y entra solo si es el de tu ciudad.' : 'Busca el sitio oficial de la entidad que la emitió.');
+  }
+
+  $('cancel').onclick = () => {
+    cancelAnimationFrame(timer);
+    state = 'stopped';
+    $('barfill').style.width = '0';
+    show(info.num ? ['result', 'go', 'again', 'copy'] : ['result', 'go', 'again']);
+    say('Apertura cancelada', 'Puedes abrir el sitio con el botón o escanear otra multa.');
+  };
+  $('again').onclick = beginScan;
+  $('start').onclick = async () => {
+    if ($('start').dataset.play && stream) {
+      delete $('start').dataset.play;
+      try { await video.play(); setupTorch(); beginScan(); return; } catch {}
+    }
+    startCamera();
+  };
+  $('copy').onclick = async () => {
+    try { await navigator.clipboard.writeText(info.num); $('copy').textContent = 'Copiado'; }
+    catch { $('copy').textContent = info.num; }
+    setTimeout(() => { $('copy').textContent = 'Copiar número'; }, 2500);
+  };
+
+  // Al volver desde el sitio de pago, seguir escaneando
+  window.addEventListener('pageshow', e => { if (e.persisted && stream) beginScan(); });
+
+  window.__test = { findUrls, isOfficial };
+  startCamera();
+})();
+</script>
+</body>
+</html>
