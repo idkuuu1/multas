@@ -73,7 +73,20 @@
     padding: 10px max(16px, env(safe-area-inset-right, 0px)) calc(16px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
     display: flex; flex-direction: column; gap: 12px; max-height: 78%; overflow-y: auto;
   }
-  #sheet::before { content: ""; align-self: center; width: 36px; height: 5px; border-radius: 3px; background: var(--glass-2); }
+  #sheet { transition: padding .25s; touch-action: pan-x; }
+  #grab { align-self: stretch; height: 26px; margin: -6px 0 -8px; border: 0; background: transparent; display: grid; place-items: center; padding: 0; }
+  #grab::before { content: ""; width: 40px; height: 5px; border-radius: 3px; background: rgba(235, 235, 245, .4); }
+  .short { display: none; font-size: .82rem; font-weight: 600; }
+  /* Minimizada: una sola fila con los tres pasos */
+  #sheet.mini { gap: 6px; padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px)); }
+  #sheet.mini .list { display: flex; }
+  #sheet.mini .item { flex: 1 1 0; min-height: 44px; padding: 8px 10px; gap: 8px; min-width: 0; }
+  #sheet.mini .item + .item { border-top: 0; border-left: .5px solid var(--hair); }
+  #sheet.mini .txt { display: none; }
+  #sheet.mini .short { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #sheet.mini .dot { width: 20px; height: 20px; }
+  #sheet.mini .dot svg { width: 11px; height: 11px; }
+  #sheet.mini .actions:has(#start[hidden]) { display: none; }
   h1 { margin: 0; font-size: 1.25rem; font-weight: 700; letter-spacing: -.01em; }
   #resultView { display: flex; flex-direction: column; gap: 12px; }
 
@@ -127,15 +140,16 @@
   </div>
 
   <div id="sheet" class="glass">
+    <button id="grab" aria-label="Minimizar o ampliar el panel" aria-expanded="true"></button>
     <!-- Mientras escanea: los tres pasos, en orden -->
     <div id="scanView">
       <div class="list">
         <div class="item" id="stSite"><span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
-          <span class="txt"><span class="lbl">1 · Sitio de pago</span><span class="val" id="vSite">Buscando el código QR…</span></span></div>
+          <span class="short">Sitio</span><span class="txt"><span class="lbl">1 · Sitio de pago</span><span class="val" id="vSite">Buscando el código QR…</span></span></div>
         <div class="item" id="stNum"><span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
-          <span class="txt"><span class="lbl">2 · Citation No.</span><span class="val mono" id="vNum">—</span></span></div>
+          <span class="short">Citation</span><span class="txt"><span class="lbl">2 · Citation No.</span><span class="val mono" id="vNum">—</span></span></div>
         <div class="item" id="stTag"><span class="dot"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
-          <span class="txt"><span class="lbl">3 · Vehicle Tag</span><span class="val mono" id="vTag">—</span></span></div>
+          <span class="short">Tag</span><span class="txt"><span class="lbl">3 · Vehicle Tag</span><span class="val mono" id="vTag">—</span></span></div>
       </div>
       <div class="actions" style="margin-top:12px">
         <button id="start" class="btn primary" hidden>Activar cámara</button>
@@ -323,6 +337,7 @@ window.addEventListener('DOMContentLoaded', () => {
     paper = null; lockHits = 0; steady = false; prevGrid = null;
     for (const f of Object.values(fields)) { f.votes.clear(); f.value = ''; f.zone = null; f.tries = 0; }
     $('resultView').hidden = true; $('scanView').hidden = false;
+    try { sheet.classList.toggle('mini', !!localStorage.getItem('multas.mini')); } catch {}
     step('stSite', 'busy', 'Buscando el código QR…'); step('stNum', '', '—'); step('stTag', '', '—');
     box.className = '';
     requestAnimationFrame(() => { placeBox(defaultBox(), false); });
@@ -522,6 +537,7 @@ window.addEventListener('DOMContentLoaded', () => {
     if (state !== 'scanning') return;
     state = 'result';
     box.classList.add('done', 'locked');
+    sheet.classList.remove('mini');
     $('scanView').hidden = true; $('resultView').hidden = false;
     $('fNum').value = fields.num.value; $('fTag').value = fields.tag.value;
     $('foot').textContent = FOOT;
@@ -582,6 +598,24 @@ window.addEventListener('DOMContentLoaded', () => {
     }
     if (site && go.href === site.href) remember(site.hostname);
   });
+
+  // Panel inferior: se minimiza deslizando hacia abajo o tocando la barrita, y se amplía al revés
+  function setMini(on) {
+    if (state === 'result') on = false;
+    sheet.classList.toggle('mini', on);
+    $('grab').setAttribute('aria-expanded', String(!on));
+    try { localStorage.setItem('multas.mini', on ? '1' : ''); } catch {}
+    if (state === 'scanning' && !(lockHits >= 2 && paper)) requestAnimationFrame(() => placeBox(defaultBox()));
+  }
+  $('grab').onclick = () => setMini(!sheet.classList.contains('mini'));
+  let dragY = null;
+  sheet.addEventListener('touchstart', e => { dragY = e.touches[0].clientY; }, { passive: true });
+  sheet.addEventListener('touchend', e => {
+    if (dragY === null || state !== 'scanning') { dragY = null; return; }
+    const dy = e.changedTouches[0].clientY - dragY; dragY = null;
+    if (dy > 28) setMini(true); else if (dy < -28) setMini(false);
+  }, { passive: true });
+  try { if (localStorage.getItem('multas.mini')) sheet.classList.add('mini'); } catch {}
 
   addEventListener('resize', () => { if (state === 'scanning' && !paper) placeBox(defaultBox()); });
   window.__test = { judge, parse, fields };
